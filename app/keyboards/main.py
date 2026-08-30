@@ -6,6 +6,12 @@ def main_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
+                    text="🧠 Profilni sozlash",
+                    callback_data="start_onboarding",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="📱 Telegram ulash",
                     callback_data="telegram_connect",
                 )
