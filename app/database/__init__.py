@@ -1,42 +1,28 @@
-from app.database.db import (
-    AsyncSessionLocal,
-    Base,
-    check_database,
-    close_database,
-    create_tables,
-    engine,
-)
+import asyncio
+import logging
 
-from app.database.models import (
-    AdminStatistics,
-    AutoReply,
-    AutoReplyKeyword,
-    FirstMessage,
-    Payment,
-    Referral,
-    Statistics,
-    Subscription,
-    TelegramAccount,
-    User,
-    UserSettings,
-)
+from app.database.db import create_tables, check_database
 
-__all__ = [
-    "Base",
-    "engine",
-    "AsyncSessionLocal",
-    "check_database",
-    "create_tables",
-    "close_database",
-    "User",
-    "UserSettings",
-    "TelegramAccount",
-    "AutoReply",
-    "AutoReplyKeyword",
-    "FirstMessage",
-    "Referral",
-    "Statistics",
-    "Subscription",
-    "Payment",
-    "AdminStatistics",
-]
+
+logging.basicConfig(level=logging.INFO)
+
+
+async def main() -> None:
+    logging.info("PostgreSQL tekshirilmoqda...")
+
+    if not await check_database():
+        raise RuntimeError(
+            "PostgreSQL bazasiga ulanib bo'lmadi."
+        )
+
+    logging.info("PostgreSQL ulandi.")
+
+    await create_tables()
+
+    logging.info(
+        "Nano-Bot database jadvallari yaratildi."
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
