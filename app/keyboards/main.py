@@ -6,46 +6,44 @@ def main_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🧠 Profilni sozlash",
-                    callback_data="start_onboarding",
-                )
-            ],
-            [
-                InlineKeyboardButton(
                     text="📱 Telegram ulash",
                     callback_data="telegram_connect",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🔑 Kalit so'zlar",
-                    callback_data="keywords",
+                    text="🤖 Avto javoblar",
+                    callback_data="auto_replies",
                 ),
                 InlineKeyboardButton(
-                    text="💬 Javoblar",
-                    callback_data="responses",
+                    text="1️⃣ Birinchi xabar",
+                    callback_data="first_message",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    text="📊 Suhbatlar",
-                    callback_data="conversations",
+                    text="👥 Referallar",
+                    callback_data="referrals",
                 ),
                 InlineKeyboardButton(
-                    text="📈 Statistika",
+                    text="📊 Statistika",
                     callback_data="statistics",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🌐 Til",
+                    callback_data="language",
+                ),
+                InlineKeyboardButton(
+                    text="💎 Premium",
+                    callback_data="premium",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     text="⚙️ Sozlamalar",
                     callback_data="settings",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="💳 Obuna",
-                    callback_data="subscription",
                 )
             ],
         ]
