@@ -2,68 +2,103 @@ import os
 
 from dotenv import load_dotenv
 
-
 load_dotenv()
 
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+def get_env(
+    name: str,
+    default: str = "",
+) -> str:
+    value = os.getenv(name)
 
-TELEGRAM_API_ID = os.getenv(
-    "TELEGRAM_API_ID",
-    "",
-).strip()
+    if value is None:
+        return default
 
-TELEGRAM_API_HASH = os.getenv(
-    "TELEGRAM_API_HASH",
-    "",
-).strip()
+    return value.strip()
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://nano_user:nano26@localhost:5432/nano_bot",
-).strip()
 
-TRIAL_DAYS = int(
-    os.getenv("TRIAL_DAYS", "7")
+# =========================================================
+# NANO-BOT
+# =========================================================
+
+BOT_TOKEN = get_env("BOT_TOKEN")
+
+BOT_USERNAME = get_env(
+    "BOT_USERNAME",
+    "nano_go_bot",
+).lstrip("@")
+
+
+# =========================================================
+# POSTGRESQL
+# =========================================================
+
+DATABASE_URL = get_env(
+    "DATABASE_URL"
 )
 
-SUBSCRIPTION_PRICE_USD = float(
-    os.getenv("SUBSCRIPTION_PRICE_USD", "1")
+
+# =========================================================
+# TELEGRAM / TELETHON
+# =========================================================
+
+TELEGRAM_API_ID = get_env(
+    "TELEGRAM_API_ID"
 )
 
-LOG_LEVEL = os.getenv(
+TELEGRAM_API_HASH = get_env(
+    "TELEGRAM_API_HASH"
+)
+
+TELEGRAM_SESSION_DIR = get_env(
+    "TELEGRAM_SESSION_DIR",
+    "/opt/nano_bot/sessions",
+)
+
+
+# =========================================================
+# ADMIN
+# =========================================================
+
+ADMIN_ID_RAW = get_env(
+    "ADMIN_ID"
+)
+
+try:
+    ADMIN_ID = (
+        int(ADMIN_ID_RAW)
+        if ADMIN_ID_RAW
+        else 0
+    )
+except ValueError:
+    ADMIN_ID = 0
+
+
+# =========================================================
+# PREMIUM
+# =========================================================
+
+PREMIUM_PRICE = get_env(
+    "PREMIUM_PRICE",
+    "1",
+)
+
+PREMIUM_CURRENCY = get_env(
+    "PREMIUM_CURRENCY",
+    "USD",
+)
+
+
+# =========================================================
+# APPLICATION
+# =========================================================
+
+APP_ENV = get_env(
+    "APP_ENV",
+    "production",
+)
+
+LOG_LEVEL = get_env(
     "LOG_LEVEL",
     "INFO",
 ).upper()
-
-ADMIN_IDS = {
-    int(user_id.strip())
-    for user_id in os.getenv(
-        "ADMIN_IDS",
-        "",
-    ).split(",")
-    if user_id.strip().isdigit()
-}
-
-
-def validate_bot_config() -> None:
-    if not BOT_TOKEN:
-        raise ValueError(
-            "BOT_TOKEN .env faylida belgilanmagan."
-        )
-
-
-def validate_telegram_config() -> None:
-    if not TELEGRAM_API_ID:
-        raise ValueError(
-            "TELEGRAM_API_ID .env faylida belgilanmagan."
-        )
-
-    if not TELEGRAM_API_HASH:
-        raise ValueError(
-            "TELEGRAM_API_HASH .env faylida belgilanmagan."
-        )
-
-
-def is_admin(telegram_id: int) -> bool:
-    return telegram_id in ADMIN_IDS
