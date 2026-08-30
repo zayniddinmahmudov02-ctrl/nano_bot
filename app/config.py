@@ -20,7 +20,7 @@ TELEGRAM_API_HASH = os.getenv(
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://nano_user:CHANGE_ME@localhost:5432/nano_bot",
+    "postgresql+asyncpg://nano_user:nano26@localhost:5432/nano_bot",
 ).strip()
 
 TRIAL_DAYS = int(
@@ -36,9 +36,6 @@ LOG_LEVEL = os.getenv(
     "INFO",
 ).upper()
 
-# Admin Telegram ID'lari.
-# Masalan:
-# ADMIN_IDS=123456789,987654321
 ADMIN_IDS = {
     int(user_id.strip())
     for user_id in os.getenv(

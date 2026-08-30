@@ -3,6 +3,12 @@ import logging
 
 from aiogram.fsm.storage.memory import MemoryStorage
 
+from app.database.db import (
+    check_database,
+    close_database,
+    create_tables,
+)
+
 from app.telegram.bot import (
     create_bot,
     create_dispatcher,
@@ -23,7 +29,6 @@ from app.handlers import (
 
 
 async def main() -> None:
-
     logging.basicConfig(
         level=logging.INFO,
         format=(
@@ -32,6 +37,21 @@ async def main() -> None:
             "%(name)s | "
             "%(message)s"
         ),
+    )
+
+    logging.info("PostgreSQL tekshirilmoqda...")
+
+    if not await check_database():
+        raise RuntimeError(
+            "PostgreSQL bazasiga ulanib bo'lmadi."
+        )
+
+    logging.info("PostgreSQL ulandi.")
+
+    await create_tables()
+
+    logging.info(
+        "Database jadvallari tayyor."
     )
 
     bot = create_bot()
@@ -58,6 +78,7 @@ async def main() -> None:
 
     finally:
         await bot.session.close()
+        await close_database()
 
 
 if __name__ == "__main__":
