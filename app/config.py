@@ -11,9 +11,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "").strip()
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "").strip()
 
-DATABASE_PATH = os.getenv(
-    "DATABASE_PATH",
-    "data/nano_bot.db",
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+asyncpg://nano_user:CHANGE_ME@localhost:5432/nano_bot",
 )
 
 TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7"))
