@@ -1,17 +1,12 @@
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
-def referral_keyboard() -> ReplyKeyboardMarkup:
+def statistics_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
                 KeyboardButton(
-                    text="🔗 Referal havolam"
-                ),
-            ],
-            [
-                KeyboardButton(
-                    text="🏆 Referal darajam"
+                    text="🔄 Yangilash"
                 ),
             ],
             [

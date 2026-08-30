@@ -1,50 +1,103 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
-def main_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+def main_menu_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Nano-Bot asosiy menyusi.
+    """
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
             [
-                InlineKeyboardButton(
-                    text="📱 Telegram ulash",
-                    callback_data="telegram_connect",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🤖 Avto javoblar",
-                    callback_data="auto_replies",
-                ),
-                InlineKeyboardButton(
-                    text="1️⃣ Birinchi xabar",
-                    callback_data="first_message",
+                KeyboardButton(
+                    text="📱 Telegram ulash"
                 ),
             ],
             [
-                InlineKeyboardButton(
-                    text="👥 Referallar",
-                    callback_data="referrals",
+                KeyboardButton(
+                    text="🤖 Avto javoblar"
                 ),
-                InlineKeyboardButton(
-                    text="📊 Statistika",
-                    callback_data="statistics",
+                KeyboardButton(
+                    text="1️⃣ Birinchi xabar"
                 ),
             ],
             [
-                InlineKeyboardButton(
-                    text="🌐 Til",
-                    callback_data="language",
+                KeyboardButton(
+                    text="👥 Referallar"
                 ),
-                InlineKeyboardButton(
-                    text="💎 Premium",
-                    callback_data="premium",
+                KeyboardButton(
+                    text="📊 Statistika"
                 ),
             ],
             [
-                InlineKeyboardButton(
-                    text="⚙️ Sozlamalar",
-                    callback_data="settings",
-                )
+                KeyboardButton(
+                    text="🌐 Til"
+                ),
+                KeyboardButton(
+                    text="💎 Premium"
+                ),
             ],
-        ]
+            [
+                KeyboardButton(
+                    text="⚙️ Sozlamalar"
+                ),
+            ],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Menyudan tanlang...",
+    )
+
+
+def back_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Orqaga qaytish tugmasi.
+    """
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="⬅️ Orqaga"
+                ),
+            ],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def cancel_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Jarayonni bekor qilish tugmasi.
+    """
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="❌ Bekor qilish"
+                ),
+            ],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def back_cancel_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Orqaga yoki bekor qilish.
+    """
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="⬅️ Orqaga"
+                ),
+                KeyboardButton(
+                    text="❌ Bekor qilish"
+                ),
+            ],
+        ],
+        resize_keyboard=True,
     )

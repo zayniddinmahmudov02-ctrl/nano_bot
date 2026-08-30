@@ -1,5 +1,7 @@
-from collections.abc import AsyncGenerator
+import logging
+import os
 
+from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -8,7 +10,16 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
-from app.config import DATABASE_URL
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL .env faylida topilmadi."
+    )
 
 
 class Base(DeclarativeBase):
@@ -29,25 +40,34 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception:
-            await session.rollback()
-            raise
-
-
 async def check_database() -> bool:
+    """
+    PostgreSQL ulanishini tekshiradi.
+    """
+
     try:
         async with engine.connect() as connection:
-            await connection.execute(text("SELECT 1"))
+            await connection.execute(
+                text("SELECT 1")
+            )
+
         return True
+
     except Exception:
+        logger.exception(
+            "PostgreSQL ulanishida xatolik."
+        )
         return False
 
 
 async def create_tables() -> None:
+    """
+    Barcha SQLAlchemy jadvallarini yaratadi.
+
+    Mavjud jadvallar o'chirilmaydi.
+    """
+
+    # Model importlari Base metadata'ga ro'yxatdan o'tishi uchun
     from app.database import models  # noqa: F401
 
     async with engine.begin() as connection:
@@ -55,6 +75,18 @@ async def create_tables() -> None:
             Base.metadata.create_all
         )
 
+    logger.info(
+        "Database jadvallari tayyor."
+    )
+
 
 async def close_database() -> None:
+    """
+    Database connection poolni yopadi.
+    """
+
     await engine.dispose()
+
+    logger.info(
+        "PostgreSQL connection pool yopildi."
+    )

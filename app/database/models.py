@@ -9,7 +9,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -279,6 +278,13 @@ class AutoReply(Base):
         nullable=False,
     )
 
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
     user: Mapped["User"] = relationship(
         "User",
         back_populates="auto_replies",
@@ -472,11 +478,6 @@ class Statistics(Base):
         Integer,
         default=0,
         nullable=False,
-    )
-
-    last_reset_date: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True,
     )
 
     user: Mapped["User"] = relationship(

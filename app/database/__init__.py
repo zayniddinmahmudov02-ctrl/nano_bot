@@ -1,42 +1,17 @@
 from app.database.db import (
-    AsyncSessionLocal,
     Base,
-    check_database,
-    close_database,
-    create_tables,
+    AsyncSessionLocal,
     engine,
-)
-
-from app.database.models import (
-    AdminStatistics,
-    AutoReply,
-    AutoReplyKeyword,
-    FirstMessage,
-    Payment,
-    Referral,
-    Statistics,
-    Subscription,
-    TelegramAccount,
-    User,
-    UserSettings,
+    check_database,
+    create_tables,
+    close_database,
 )
 
 __all__ = [
     "Base",
-    "engine",
     "AsyncSessionLocal",
+    "engine",
     "check_database",
     "create_tables",
     "close_database",
-    "User",
-    "UserSettings",
-    "TelegramAccount",
-    "AutoReply",
-    "AutoReplyKeyword",
-    "FirstMessage",
-    "Referral",
-    "Statistics",
-    "Subscription",
-    "Payment",
-    "AdminStatistics",
 ]
