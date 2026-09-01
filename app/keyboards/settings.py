@@ -40,3 +40,16 @@ def name_cancel_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
     )
+
+
+def settings_back_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="🏠 Bosh menyu"
+                ),
+            ],
+        ],
+        resize_keyboard=True,
+    )
