@@ -42,6 +42,19 @@ def name_cancel_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def settings_cancel_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="❌ Bekor qilish"
+                ),
+            ],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def settings_back_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
