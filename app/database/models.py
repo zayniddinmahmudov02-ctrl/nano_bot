@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -6,15 +7,21 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
+    func,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
     pass
 
+
+# ============================================================
+# USER
+# ============================================================
 
 class User(Base):
     __tablename__ = "users"
@@ -25,7 +32,6 @@ class User(Base):
         autoincrement=True,
     )
 
-    # Telegram user ID katta son bo‘lishi mumkin
     telegram_id: Mapped[int] = mapped_column(
         BigInteger,
         unique=True,
@@ -33,17 +39,17 @@ class User(Base):
         index=True,
     )
 
-    username: Mapped[str | None] = mapped_column(
+    username: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
     )
 
-    first_name: Mapped[str | None] = mapped_column(
+    first_name: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
     )
 
-    last_name: Mapped[str | None] = mapped_column(
+    last_name: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
     )
@@ -54,79 +60,32 @@ class User(Base):
         nullable=False,
     )
 
+    # Python: user.active
+    # PostgreSQL: users.is_active
     active: Mapped[bool] = mapped_column(
+        "is_active",
         Boolean,
         default=True,
         nullable=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
-    settings: Mapped["UserSettings | None"] = relationship(
-        "UserSettings",
-        back_populates="user",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
 
-    telegram_accounts: Mapped[list["TelegramAccount"]] = relationship(
-        "TelegramAccount",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-
-    auto_replies: Mapped[list["AutoReply"]] = relationship(
-        "AutoReply",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-
-    first_message: Mapped["FirstMessage | None"] = relationship(
-        "FirstMessage",
-        back_populates="user",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-
-    referral: Mapped["Referral | None"] = relationship(
-        "Referral",
-        back_populates="user",
-        uselist=False,
-        foreign_keys="Referral.user_id",
-        cascade="all, delete-orphan",
-    )
-
-    statistics: Mapped["Statistics | None"] = relationship(
-        "Statistics",
-        back_populates="user",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-
-    subscription: Mapped["Subscription | None"] = relationship(
-        "Subscription",
-        back_populates="user",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-
-    payments: Mapped[list["Payment"]] = relationship(
-        "Payment",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-
+# ============================================================
+# USER SETTINGS
+# ============================================================
 
 class UserSettings(Base):
     __tablename__ = "user_settings"
@@ -142,6 +101,7 @@ class UserSettings(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
+        index=True,
     )
 
     language: Mapped[str] = mapped_column(
@@ -157,23 +117,22 @@ class UserSettings(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship(
-        "User",
-        back_populates="settings",
-    )
 
+# ============================================================
+# TELEGRAM ACCOUNT
+# ============================================================
 
 class TelegramAccount(Base):
     __tablename__ = "telegram_accounts"
@@ -184,7 +143,6 @@ class TelegramAccount(Base):
         autoincrement=True,
     )
 
-    # Bu users.id — ichki DB ID
     user_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -192,7 +150,6 @@ class TelegramAccount(Base):
         index=True,
     )
 
-    # Bu haqiqiy Telegram account ID
     telegram_id: Mapped[int] = mapped_column(
         BigInteger,
         unique=True,
@@ -200,12 +157,12 @@ class TelegramAccount(Base):
         index=True,
     )
 
-    phone: Mapped[str | None] = mapped_column(
+    phone: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
     )
 
-    username: Mapped[str | None] = mapped_column(
+    username: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
     )
@@ -215,13 +172,11 @@ class TelegramAccount(Base):
         nullable=False,
     )
 
-    # Eski DB strukturasida mavjud bo‘lishi mumkin
-    session_data: Mapped[str | None] = mapped_column(
+    session_data: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
     )
 
-    # Eski DB strukturasiga mos
     status: Mapped[str] = mapped_column(
         String(50),
         default="disconnected",
@@ -234,34 +189,29 @@ class TelegramAccount(Base):
         nullable=False,
     )
 
-    # Yangi kod foydalanadigan flag
     is_connected: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
         nullable=False,
     )
 
-    connected_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True,
-    )
-
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship(
-        "User",
-        back_populates="telegram_accounts",
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
-    auto_replies: Mapped[list["AutoReply"]] = relationship(
-        "AutoReply",
-        back_populates="telegram_account",
-    )
 
+# ============================================================
+# AUTO REPLY
+# ============================================================
 
 class AutoReply(Base):
     __tablename__ = "auto_replies"
@@ -279,14 +229,14 @@ class AutoReply(Base):
         index=True,
     )
 
-    telegram_account_id: Mapped[int | None] = mapped_column(
+    telegram_account_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey("telegram_accounts.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
 
-    title: Mapped[str | None] = mapped_column(
+    title: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
     )
@@ -297,17 +247,17 @@ class AutoReply(Base):
         nullable=False,
     )
 
-    message_text: Mapped[str | None] = mapped_column(
+    message_text: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
     )
 
-    file_id: Mapped[str | None] = mapped_column(
+    file_id: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
     )
 
-    link: Mapped[str | None] = mapped_column(
+    link: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
     )
@@ -319,34 +269,22 @@ class AutoReply(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship(
-        "User",
-        back_populates="auto_replies",
-    )
 
-    telegram_account: Mapped["TelegramAccount | None"] = relationship(
-        "TelegramAccount",
-        back_populates="auto_replies",
-    )
-
-    keywords: Mapped[list["AutoReplyKeyword"]] = relationship(
-        "AutoReplyKeyword",
-        back_populates="auto_reply",
-        cascade="all, delete-orphan",
-    )
-
+# ============================================================
+# AUTO REPLY KEYWORD
+# ============================================================
 
 class AutoReplyKeyword(Base):
     __tablename__ = "auto_reply_keywords"
@@ -367,20 +305,18 @@ class AutoReplyKeyword(Base):
     keyword: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        index=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
-    auto_reply: Mapped["AutoReply"] = relationship(
-        "AutoReply",
-        back_populates="keywords",
-    )
 
+# ============================================================
+# FIRST MESSAGE
+# ============================================================
 
 class FirstMessage(Base):
     __tablename__ = "first_messages"
@@ -396,6 +332,7 @@ class FirstMessage(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
+        index=True,
     )
 
     message_type: Mapped[str] = mapped_column(
@@ -404,17 +341,17 @@ class FirstMessage(Base):
         nullable=False,
     )
 
-    text: Mapped[str | None] = mapped_column(
+    text: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
     )
 
-    file_id: Mapped[str | None] = mapped_column(
+    file_id: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
     )
 
-    link: Mapped[str | None] = mapped_column(
+    link: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
     )
@@ -426,23 +363,22 @@ class FirstMessage(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship(
-        "User",
-        back_populates="first_message",
-    )
 
+# ============================================================
+# REFERRAL
+# ============================================================
 
 class Referral(Base):
     __tablename__ = "referrals"
@@ -458,12 +394,14 @@ class Referral(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
+        index=True,
     )
 
-    referred_by: Mapped[int | None] = mapped_column(
+    referred_by: Mapped[Optional[int]] = mapped_column(
         Integer,
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
 
     referral_code: Mapped[str] = mapped_column(
@@ -480,22 +418,15 @@ class Referral(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship(
-        "User",
-        back_populates="referral",
-        foreign_keys=[user_id],
-    )
 
-    referrer: Mapped["User | None"] = relationship(
-        "User",
-        foreign_keys=[referred_by],
-    )
-
+# ============================================================
+# STATISTICS
+# ============================================================
 
 class Statistics(Base):
     __tablename__ = "statistics"
@@ -511,6 +442,7 @@ class Statistics(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
+        index=True,
     )
 
     replied_people: Mapped[int] = mapped_column(
@@ -532,23 +464,22 @@ class Statistics(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship(
-        "User",
-        back_populates="statistics",
-    )
 
+# ============================================================
+# SUBSCRIPTION
+# ============================================================
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
@@ -564,6 +495,7 @@ class Subscription(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
+        index=True,
     )
 
     status: Mapped[str] = mapped_column(
@@ -572,44 +504,43 @@ class Subscription(Base):
         nullable=False,
     )
 
-    trial_started_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
+    trial_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 
-    trial_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
+    trial_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 
-    premium_started_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
+    premium_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 
-    premium_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
+    premium_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship(
-        "User",
-        back_populates="subscription",
-    )
 
+# ============================================================
+# PAYMENT
+# ============================================================
 
 class Payment(Base):
     __tablename__ = "payments"
@@ -627,9 +558,8 @@ class Payment(Base):
         index=True,
     )
 
-    amount: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
+    amount: Mapped[float] = mapped_column(
+        Numeric(12, 2),
         nullable=False,
     )
 
@@ -645,23 +575,22 @@ class Payment(Base):
         nullable=False,
     )
 
-    payment_id: Mapped[str | None] = mapped_column(
+    payment_id: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
         index=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship(
-        "User",
-        back_populates="payments",
-    )
 
+# ============================================================
+# ADMIN STATISTICS
+# ============================================================
 
 class AdminStatistics(Base):
     __tablename__ = "admin_statistics"
@@ -696,15 +625,15 @@ class AdminStatistics(Base):
         nullable=False,
     )
 
-    total_revenue: Mapped[int] = mapped_column(
-        Integer,
+    total_revenue: Mapped[float] = mapped_column(
+        Numeric(12, 2),
         default=0,
         nullable=False,
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
