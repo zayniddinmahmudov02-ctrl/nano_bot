@@ -9,14 +9,15 @@ from sqlalchemy import select
 from app.config import BOT_USERNAME
 from app.database import AsyncSessionLocal
 from app.database.models import Referral
-from app.keyboards.main import main_menu_keyboard
-from app.keyboards.referral import (
+from app.services.user_service import get_user_by_telegram_id
+
+from ..keyboards.main import main_menu_keyboard
+from ..keyboards.referral import (
     referral_back_keyboard,
     referral_keyboard,
     referral_level_keyboard,
     referral_link_keyboard,
 )
-from app.services.user_service import get_user_by_telegram_id
 
 logger = logging.getLogger(__name__)
 
