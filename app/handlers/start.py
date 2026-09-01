@@ -7,7 +7,6 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.database.models import (
-    AdminStatistics,
     Referral,
     Statistics,
     Subscription,
@@ -23,7 +22,18 @@ router = Router()
 
 
 async def initialize_user_data(user: User) -> None:
+    """
+    Foydalanuvchi uchun kerakli boshlang‘ich ma’lumotlarni yaratadi.
+
+    Quyidagilar yaratiladi:
+    - UserSettings
+    - Statistics
+    - Subscription
+    - Referral
+    """
+
     async with AsyncSessionLocal() as session:
+
         # -------------------------------------------------
         # USER SETTINGS
         # -------------------------------------------------
@@ -109,67 +119,10 @@ async def initialize_user_data(user: User) -> None:
             session.add(referral)
 
         # -------------------------------------------------
-        # ADMIN STATISTICS
+        # SAVE
         # -------------------------------------------------
-        #
-        # Faqat mavjud bo‘lmasa yaratamiz.
-        # Eski DBdagi ustunlarni o‘qimaymiz.
-        #
-
-        result = await session.execute(
-            select(AdminStatistics.id).limit(1)
-        )
-
-        admin_exists = result.scalar_one_or_none()
-
-        if admin_exists is None:
-            session.add(
-                AdminStatistics(
-                    total_users=0,
-                    total_auto_replies=0,
-                    total_replied_people=0,
-                    total_payments=0,
-                    total_revenue=0,
-                )
-            )
 
         await session.commit()
-
-
-async def update_admin_user_count() -> None:
-    """
-    Admin statistikasini imkon qadar yangilaydi.
-
-    Eski DB sxemasida AdminStatistics ustunlari to‘liq
-    bo‘lmasligi mumkin. Shuning uchun xato bo‘lsa,
-    asosiy bot ishlashiga halaqit bermaydi.
-    """
-
-    try:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(AdminStatistics).limit(1)
-            )
-
-            admin_stats = result.scalar_one_or_none()
-
-            if admin_stats is None:
-                return
-
-            result = await session.execute(
-                select(User.id)
-            )
-
-            users = result.scalars().all()
-
-            admin_stats.total_users = len(users)
-
-            await session.commit()
-
-    except Exception:
-        logger.exception(
-            "Admin statistikasi yangilanmadi."
-        )
 
 
 async def process_start(message: Message) -> None:
@@ -179,21 +132,25 @@ async def process_start(message: Message) -> None:
         return
 
     try:
+        # -------------------------------------------------
+        # USER
+        # -------------------------------------------------
+
         async with AsyncSessionLocal() as session:
-            user, is_new_user = await get_or_create_user(
+            user = await get_or_create_user(
                 session,
                 telegram_user,
             )
 
-        if is_new_user:
-            await initialize_user_data(user)
+        # -------------------------------------------------
+        # USER DATA
+        # -------------------------------------------------
 
-            try:
-                await update_admin_user_count()
-            except Exception:
-                logger.exception(
-                    "Admin user count yangilanmadi."
-                )
+        await initialize_user_data(user)
+
+        # -------------------------------------------------
+        # MAIN MENU
+        # -------------------------------------------------
 
         await message.answer(
             "👋 <b>Nano-Bot</b>ga xush kelibsiz!\n\n"
