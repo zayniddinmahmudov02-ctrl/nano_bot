@@ -20,11 +20,6 @@ async def get_or_create_subscription(
     session,
     user_id: int,
 ) -> Subscription:
-    """
-    user_id — users.id.
-    Telegram ID emas.
-    """
-
     result = await session.execute(
         select(Subscription).where(
             Subscription.user_id == user_id
@@ -43,6 +38,16 @@ async def get_or_create_subscription(
         await session.flush()
 
     return subscription
+
+
+def is_premium_active(subscription: Subscription) -> bool:
+    if subscription.status != "premium":
+        return False
+
+    if subscription.premium_expires_at is None:
+        return True
+
+    return subscription.premium_expires_at > datetime.utcnow()
 
 
 @router.message(F.text == "💎 Premium")
@@ -70,45 +75,33 @@ async def premium_menu(message: Message) -> None:
 
         await session.commit()
 
-        status = subscription.status or "free"
+        active = is_premium_active(subscription)
+        expires_at = subscription.premium_expires_at
 
-        premium_expires_at = (
-            subscription.premium_expires_at
+    if active:
+        expiry_text = (
+            f"📅 Amal qilish muddati: "
+            f"<b>{expires_at:%d.%m.%Y}</b>"
+            if expires_at
+            else "📅 Amal qilish muddati: <b>Cheksiz</b>"
         )
 
-    # ---------------------------------------------------------
-    # PREMIUM ACTIVE
-    # ---------------------------------------------------------
-
-    is_active = (
-        status == "premium"
-        and premium_expires_at is not None
-        and premium_expires_at > datetime.utcnow()
-    )
-
-    if is_active:
         await message.answer(
             "💎 <b>Nano-Bot Premium</b>\n\n"
             "✅ Premium obunangiz faol.\n\n"
-            f"📅 Amal qilish muddati: "
-            f"<b>{premium_expires_at:%d.%m.%Y}</b>\n\n"
+            f"{expiry_text}\n\n"
             "Premium imkoniyatlaridan foydalanishingiz "
             "mumkin.",
             reply_markup=main_menu_keyboard(),
         )
         return
 
-    # ---------------------------------------------------------
-    # FREE
-    # ---------------------------------------------------------
-
     await message.answer(
         "💎 <b>Nano-Bot Premium</b>\n\n"
-        "Hozircha Premium funksiyalari "
-        "<b>bepul</b> taqdim etilmoqda. 🎉\n\n"
+        "🎉 Hozircha Premium funksiyalari "
+        "<b>bepul</b> taqdim etilmoqda.\n\n"
         f"💰 Kelajakdagi narx: "
-        f"<b>${PREMIUM_PRICE:.2f} "
-        f"{PREMIUM_CURRENCY}</b> / oy\n\n"
+        f"<b>{PREMIUM_PRICE} {PREMIUM_CURRENCY}</b> / oy\n\n"
         "🚀 To‘lov tizimi keyingi bosqichda "
         "ishga tushiriladi.\n\n"
         "Hozircha Nano-Bot'dan bepul foydalanishingiz "
@@ -128,4 +121,5 @@ async def premium_back(message: Message) -> None:
 __all__ = [
     "router",
     "get_or_create_subscription",
+    "is_premium_active",
 ]
