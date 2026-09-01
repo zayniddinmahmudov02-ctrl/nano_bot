@@ -147,10 +147,10 @@ async def get_or_create_user(message: Message) -> tuple[User, bool]:
         if admin_statistics is None:
             admin_statistics = AdminStatistics(
                 total_users=0,
-                total_connected_accounts=0,
                 total_auto_replies=0,
-                total_first_messages=0,
-                total_referrals=0,
+                total_replied_people=0,
+                total_payments=0,
+                total_revenue=0,
             )
             session.add(admin_statistics)
 
