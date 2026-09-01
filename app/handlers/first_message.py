@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.database import AsyncSessionLocal
 from app.database.models import FirstMessage
 from app.keyboards.main import main_menu_keyboard
+from app.services.user_service import get_user_by_telegram_id
 
 logger = logging.getLogger(__name__)
 
@@ -20,315 +21,302 @@ class FirstMessageStates(StatesGroup):
     waiting_edit_message = State()
 
 
-# =========================================================
-# HELPERS
-# =========================================================
-
-def extract_message_data(message: Message) -> dict:
-    """
-    Telegram botga yuborilgan xabardan media/text ma'lumotini oladi.
-    """
-
-    if message.photo:
-        return {
-            "message_type": "photo",
-            "message_text": message.caption or "",
-            "file_id": message.photo[-1].file_id,
-            "link": None,
-        }
-
-    if message.video:
-        return {
-            "message_type": "video",
-            "message_text": message.caption or "",
-            "file_id": message.video.file_id,
-            "link": None,
-        }
-
-    if message.document:
-        return {
-            "message_type": "document",
-            "message_text": message.caption or "",
-            "file_id": message.document.file_id,
-            "link": None,
-        }
-
-    if message.text:
-        return {
-            "message_type": "text",
-            "message_text": message.text,
-            "file_id": None,
-            "link": None,
-        }
-
-    return {
-        "message_type": "text",
-        "message_text": "",
-        "file_id": None,
-        "link": None,
-    }
-
-
-async def get_first_message(
-    user_id: int,
-) -> FirstMessage | None:
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(FirstMessage).where(
-                FirstMessage.user_id == user_id
-            )
-        )
-
-        return result.scalar_one_or_none()
-
-
 def first_message_keyboard():
-    from aiogram.types import KeyboardButton
-    from aiogram.types import ReplyKeyboardMarkup
+    """
+    First message menyusi.
+    """
 
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(
-                    text="✏️ Birinchi xabarni tahrirlash"
-                ),
-            ],
-            [
-                KeyboardButton(
-                    text="🗑 Birinchi xabarni o‘chirish"
-                ),
-            ],
-            [
-                KeyboardButton(
-                    text="🔄 Yoqish/O‘chirish"
-                ),
-            ],
-            [
-                KeyboardButton(
-                    text="⬅️ Orqaga"
-                ),
-            ],
-        ],
+    from aiogram.types import ReplyKeyboardMarkup
+    from aiogram.utils.keyboard import ReplyKeyboardBuilder
+
+    builder = ReplyKeyboardBuilder()
+
+    builder.button(text="➕ Birinchi xabar yaratish")
+    builder.button(text="✏️ Birinchi xabarni o‘zgartirish")
+    builder.button(text="🗑 Birinchi xabarni o‘chirish")
+    builder.button(text="🔄 Yoqish / O‘chirish")
+    builder.button(text="📋 Birinchi xabar holati")
+    builder.button(text="🏠 Bosh menyu")
+
+    builder.adjust(2, 2, 1, 1)
+
+    return builder.as_markup(
         resize_keyboard=True,
+        is_persistent=True,
     )
 
-
-def first_message_cancel_keyboard():
-    from aiogram.types import KeyboardButton
-    from aiogram.types import ReplyKeyboardMarkup
-
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(
-                    text="❌ Bekor qilish"
-                ),
-            ],
-        ],
-        resize_keyboard=True,
-    )
-
-
-# =========================================================
-# MAIN MENU
-# =========================================================
 
 @router.message(F.text == "1️⃣ Birinchi xabar")
 async def first_message_menu(
     message: Message,
     state: FSMContext,
 ) -> None:
-
     await state.clear()
 
-    user_id = message.from_user.id
+    telegram_id = int(message.from_user.id)
 
-    first_message = await get_first_message(
-        user_id
-    )
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
 
-    if not first_message:
+        if user is None:
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.\n\n"
+                "Iltimos, /start buyrug‘ini bosing.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        first_message = result.scalar_one_or_none()
+
+    if first_message is None:
         await message.answer(
             "1️⃣ <b>Birinchi xabar</b>\n\n"
-            "Sizga birinchi marta yozgan odamga "
-            "yuboriladigan xabar hali sozlanmagan.\n\n"
-            "📩 Yangi birinchi xabar yaratish uchun "
-            "xabarni yuboring.\n\n"
-            "📝 Matn\n"
-            "🖼 Rasm\n"
-            "🎥 Video\n"
-            "📎 Fayl",
-            reply_markup=first_message_cancel_keyboard(),
+            "Sizda hozircha birinchi xabar "
+            "sozlanmagan.\n\n"
+            "Yangi xabar yarating. U sizga "
+            "birinchi marta yozgan foydalanuvchiga "
+            "yuboriladi.",
+            reply_markup=first_message_keyboard(),
         )
-
-        await state.set_state(
-            FirstMessageStates.waiting_message
-        )
-
         return
 
     status = (
         "🟢 Faol"
-        if first_message.is_active
+        if first_message.active
         else "🔴 O‘chiq"
-    )
-
-    preview = (
-        first_message.message_text
-        or "Media xabar"
     )
 
     await message.answer(
         "1️⃣ <b>Birinchi xabar</b>\n\n"
-        f"📩 Turi: <b>{first_message.message_type}</b>\n"
-        f"🟢 Holat: <b>{status}</b>\n\n"
-        "📄 <b>Xabar:</b>\n"
-        f"{preview[:1000]}",
+        f"📦 Tur: <code>{first_message.message_type}</code>\n"
+        f"📊 Holat: <b>{status}</b>\n\n"
+        "Birinchi marta yozgan foydalanuvchiga "
+        "avtomatik yuboriladigan xabarni "
+        "boshqarishingiz mumkin.",
         reply_markup=first_message_keyboard(),
     )
 
 
-# =========================================================
-# CREATE
-# =========================================================
+@router.message(F.text == "➕ Birinchi xabar yaratish")
+async def create_first_message_start(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        existing = result.scalar_one_or_none()
+
+    if existing:
+        await message.answer(
+            "⚠️ Sizda allaqachon birinchi xabar mavjud.\n\n"
+            "Uni yangi xabar bilan almashtirish uchun "
+            "✏️ <b>Birinchi xabarni o‘zgartirish</b> "
+            "tugmasidan foydalaning.",
+            reply_markup=first_message_keyboard(),
+        )
+        return
+
+    await state.clear()
+    await state.set_state(
+        FirstMessageStates.waiting_message
+    )
+
+    await message.answer(
+        "📩 <b>Birinchi xabarni yuboring</b>\n\n"
+        "Matn, rasm, video yoki hujjat yuborishingiz mumkin.\n\n"
+        "Bu xabar sizning Telegram akkauntingizga "
+        "birinchi marta yozgan foydalanuvchiga yuboriladi.\n\n"
+        "Bekor qilish uchun:\n"
+        "❌ Bekor qilish"
+    )
+
 
 @router.message(
     FirstMessageStates.waiting_message,
     F.text == "❌ Bekor qilish",
 )
-async def cancel_first_message_create(
+async def cancel_create_first_message(
     message: Message,
     state: FSMContext,
 ) -> None:
-
     await state.clear()
 
     await message.answer(
         "❌ Birinchi xabar yaratish bekor qilindi.",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=first_message_keyboard(),
     )
 
 
 @router.message(
     FirstMessageStates.waiting_message,
 )
-async def save_first_message(
+async def receive_first_message(
     message: Message,
     state: FSMContext,
 ) -> None:
+    message_type = None
+    text = None
+    file_id = None
 
-    user_id = message.from_user.id
+    if message.text:
+        message_type = "text"
+        text = message.text
 
-    data = extract_message_data(
-        message
-    )
+    elif message.photo:
+        message_type = "photo"
+        file_id = message.photo[-1].file_id
+        text = message.caption
 
-    if (
-        data["message_type"] == "text"
-        and not data["message_text"]
-    ):
+    elif message.video:
+        message_type = "video"
+        file_id = message.video.file_id
+        text = message.caption
+
+    elif message.document:
+        message_type = "document"
+        file_id = message.document.file_id
+        text = message.caption
+
+    else:
         await message.answer(
-            "❌ Iltimos, matn, rasm, video "
-            "yoki fayl yuboring."
+            "❌ Bu turdagi xabar qo‘llab-quvvatlanmaydi.\n\n"
+            "Matn, rasm, video yoki hujjat yuboring."
         )
         return
 
+    telegram_id = int(message.from_user.id)
+
     async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await state.clear()
+
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
 
         result = await session.execute(
             select(FirstMessage).where(
-                FirstMessage.user_id == user_id
+                FirstMessage.user_id == user.id
             )
         )
 
-        first_message = (
-            result.scalar_one_or_none()
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            await state.clear()
+
+            await message.answer(
+                "⚠️ Birinchi xabar allaqachon mavjud.",
+                reply_markup=first_message_keyboard(),
+            )
+            return
+
+        first_message = FirstMessage(
+            user_id=user.id,
+            message_type=message_type,
+            text=text,
+            file_id=file_id,
+            link=None,
+            active=True,
         )
 
-        if first_message:
-            first_message.message_type = (
-                data["message_type"]
-            )
-            first_message.message_text = (
-                data["message_text"]
-            )
-            first_message.file_id = (
-                data["file_id"]
-            )
-            first_message.link = (
-                data["link"]
-            )
-            first_message.is_active = True
-
-        else:
-            first_message = FirstMessage(
-                user_id=user_id,
-                message_type=data[
-                    "message_type"
-                ],
-                message_text=data[
-                    "message_text"
-                ],
-                file_id=data[
-                    "file_id"
-                ],
-                link=data[
-                    "link"
-                ],
-                is_active=True,
-            )
-
-            session.add(first_message)
+        session.add(first_message)
 
         await session.commit()
 
     await state.clear()
 
     await message.answer(
-        "✅ <b>Birinchi xabar saqlandi!</b>\n\n"
-        f"📩 Turi: <b>{data['message_type']}</b>\n"
+        "✅ <b>Birinchi xabar yaratildi!</b>\n\n"
+        f"📦 Tur: <code>{message_type}</code>\n"
         "🟢 Holat: <b>Faol</b>\n\n"
-        "Endi sizga birinchi marta yozgan "
-        "odamga ushbu xabar yuboriladi.",
+        "Endi birinchi marta yozgan foydalanuvchilarga "
+        "ushbu xabar yuboriladi.",
         reply_markup=first_message_keyboard(),
     )
 
 
-# =========================================================
-# EDIT
-# =========================================================
-
-@router.message(
-    F.text == "✏️ Birinchi xabarni tahrirlash"
-)
+@router.message(F.text == "✏️ Birinchi xabarni o‘zgartirish")
 async def edit_first_message_start(
     message: Message,
     state: FSMContext,
 ) -> None:
+    telegram_id = int(message.from_user.id)
 
-    first_message = await get_first_message(
-        message.from_user.id
-    )
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
 
-    if not first_message:
+        if user is None:
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        existing = result.scalar_one_or_none()
+
+    if existing is None:
         await message.answer(
-            "📭 Birinchi xabar hali yaratilmagan."
+            "❌ Birinchi xabar hali yaratilmagan.",
+            reply_markup=first_message_keyboard(),
         )
         return
 
+    await state.clear()
     await state.set_state(
         FirstMessageStates.waiting_edit_message
     )
 
     await message.answer(
-        "✏️ <b>Birinchi xabarni tahrirlash</b>\n\n"
-        "Yangi xabarni yuboring.\n\n"
-        "📝 Matn\n"
-        "🖼 Rasm\n"
-        "🎥 Video\n"
-        "📎 Fayl",
-        reply_markup=first_message_cancel_keyboard(),
+        "✏️ <b>Yangi birinchi xabarni yuboring.</b>\n\n"
+        "Eski xabar yangi xabar bilan almashtiriladi.\n\n"
+        "Matn, rasm, video yoki hujjat yuborishingiz mumkin.\n\n"
+        "Bekor qilish:\n"
+        "❌ Bekor qilish"
     )
 
 
@@ -336,15 +324,14 @@ async def edit_first_message_start(
     FirstMessageStates.waiting_edit_message,
     F.text == "❌ Bekor qilish",
 )
-async def cancel_first_message_edit(
+async def cancel_edit_first_message(
     message: Message,
     state: FSMContext,
 ) -> None:
-
     await state.clear()
 
     await message.answer(
-        "❌ Tahrirlash bekor qilindi.",
+        "❌ O‘zgartirish bekor qilindi.",
         reply_markup=first_message_keyboard(),
     )
 
@@ -352,60 +339,77 @@ async def cancel_first_message_edit(
 @router.message(
     FirstMessageStates.waiting_edit_message,
 )
-async def edit_first_message(
+async def receive_edit_first_message(
     message: Message,
     state: FSMContext,
 ) -> None:
+    message_type = None
+    text = None
+    file_id = None
 
-    user_id = message.from_user.id
+    if message.text:
+        message_type = "text"
+        text = message.text
 
-    data = extract_message_data(
-        message
-    )
+    elif message.photo:
+        message_type = "photo"
+        file_id = message.photo[-1].file_id
+        text = message.caption
 
-    if (
-        data["message_type"] == "text"
-        and not data["message_text"]
-    ):
+    elif message.video:
+        message_type = "video"
+        file_id = message.video.file_id
+        text = message.caption
+
+    elif message.document:
+        message_type = "document"
+        file_id = message.document.file_id
+        text = message.caption
+
+    else:
         await message.answer(
-            "❌ Yaroqli xabar yuboring."
+            "❌ Bu turdagi xabar qo‘llab-quvvatlanmaydi."
         )
         return
 
+    telegram_id = int(message.from_user.id)
+
     async with AsyncSessionLocal() as session:
-
-        result = await session.execute(
-            select(FirstMessage).where(
-                FirstMessage.user_id == user_id
-            )
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
         )
 
-        first_message = (
-            result.scalar_one_or_none()
-        )
-
-        if not first_message:
+        if user is None:
             await state.clear()
 
             await message.answer(
-                "❌ Birinchi xabar topilmadi.",
+                "❌ Foydalanuvchi topilmadi.",
                 reply_markup=main_menu_keyboard(),
             )
             return
 
-        first_message.message_type = (
-            data["message_type"]
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
         )
-        first_message.message_text = (
-            data["message_text"]
-        )
-        first_message.file_id = (
-            data["file_id"]
-        )
-        first_message.link = (
-            data["link"]
-        )
-        first_message.is_active = True
+
+        first_message = result.scalar_one_or_none()
+
+        if first_message is None:
+            await state.clear()
+
+            await message.answer(
+                "❌ Birinchi xabar topilmadi.",
+                reply_markup=first_message_keyboard(),
+            )
+            return
+
+        first_message.message_type = message_type
+        first_message.text = text
+        first_message.file_id = file_id
+        first_message.link = None
 
         await session.commit()
 
@@ -413,102 +417,190 @@ async def edit_first_message(
 
     await message.answer(
         "✅ <b>Birinchi xabar yangilandi!</b>\n\n"
-        f"📩 Turi: <b>{data['message_type']}</b>\n"
-        "🟢 Holat: <b>Faol</b>",
+        f"📦 Tur: <code>{message_type}</code>",
         reply_markup=first_message_keyboard(),
     )
 
 
-# =========================================================
-# DELETE
-# =========================================================
-
-@router.message(
-    F.text == "🗑 Birinchi xabarni o‘chirish"
-)
+@router.message(F.text == "🗑 Birinchi xabarni o‘chirish")
 async def delete_first_message(
     message: Message,
+    state: FSMContext,
 ) -> None:
+    await state.clear()
 
-    user_id = message.from_user.id
+    telegram_id = int(message.from_user.id)
 
     async with AsyncSessionLocal() as session:
-
-        result = await session.execute(
-            select(FirstMessage).where(
-                FirstMessage.user_id == user_id
-            )
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
         )
 
-        first_message = (
-            result.scalar_one_or_none()
-        )
-
-        if not first_message:
+        if user is None:
             await message.answer(
-                "📭 Birinchi xabar mavjud emas.",
+                "❌ Foydalanuvchi topilmadi.",
                 reply_markup=main_menu_keyboard(),
             )
             return
 
-        await session.delete(
-            first_message
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
         )
 
+        first_message = result.scalar_one_or_none()
+
+        if first_message is None:
+            await message.answer(
+                "ℹ️ O‘chirish uchun birinchi xabar mavjud emas.",
+                reply_markup=first_message_keyboard(),
+            )
+            return
+
+        await session.delete(first_message)
         await session.commit()
 
     await message.answer(
         "🗑 <b>Birinchi xabar o‘chirildi.</b>",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=first_message_keyboard(),
     )
 
 
-# =========================================================
-# ENABLE / DISABLE
-# =========================================================
-
-@router.message(
-    F.text == "🔄 Yoqish/O‘chirish"
-)
+@router.message(F.text == "🔄 Yoqish / O‘chirish")
 async def toggle_first_message(
     message: Message,
+    state: FSMContext,
 ) -> None:
+    await state.clear()
 
-    user_id = message.from_user.id
+    telegram_id = int(message.from_user.id)
 
     async with AsyncSessionLocal() as session:
-
-        result = await session.execute(
-            select(FirstMessage).where(
-                FirstMessage.user_id == user_id
-            )
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
         )
 
-        first_message = (
-            result.scalar_one_or_none()
-        )
-
-        if not first_message:
+        if user is None:
             await message.answer(
-                "📭 Birinchi xabar mavjud emas."
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
             )
             return
 
-        first_message.is_active = (
-            not first_message.is_active
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        first_message = result.scalar_one_or_none()
+
+        if first_message is None:
+            await message.answer(
+                "❌ Avval birinchi xabar yarating.",
+                reply_markup=first_message_keyboard(),
+            )
+            return
+
+        first_message.active = (
+            not first_message.active
         )
 
         await session.commit()
 
-        active = first_message.is_active
-
-    status = (
-        "🟢 Faollashtirildi"
-        if active
-        else "🔴 O‘chirildi"
-    )
+        status = (
+            "🟢 Faol"
+            if first_message.active
+            else "🔴 O‘chiq"
+        )
 
     await message.answer(
-        f"✅ <b>Birinchi xabar {status}.</b>",
+        "🔄 <b>Birinchi xabar holati o‘zgartirildi.</b>\n\n"
+        f"📊 Holat: <b>{status}</b>",
         reply_markup=first_message_keyboard(),
     )
+
+
+@router.message(F.text == "📋 Birinchi xabar holati")
+async def first_message_status(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+
+    telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        first_message = result.scalar_one_or_none()
+
+    if first_message is None:
+        await message.answer(
+            "❌ Birinchi xabar sozlanmagan.",
+            reply_markup=first_message_keyboard(),
+        )
+        return
+
+    status = (
+        "🟢 Faol"
+        if first_message.active
+        else "🔴 O‘chiq"
+    )
+
+    preview = (
+        first_message.text
+        if first_message.text
+        else f"[{first_message.message_type}]"
+    )
+
+    if len(preview) > 300:
+        preview = preview[:300] + "..."
+
+    await message.answer(
+        "📋 <b>Birinchi xabar holati</b>\n\n"
+        f"📊 Holat: <b>{status}</b>\n"
+        f"📦 Tur: <code>{first_message.message_type}</code>\n\n"
+        "📝 Xabar:\n"
+        f"<code>{preview}</code>",
+        reply_markup=first_message_keyboard(),
+    )
+
+
+@router.message(F.text == "🏠 Bosh menyu")
+async def first_message_back(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+
+    await message.answer(
+        "🏠 <b>Bosh menyu</b>",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+__all__ = [
+    "router",
+    "FirstMessageStates",
+    "first_message_keyboard",
+]

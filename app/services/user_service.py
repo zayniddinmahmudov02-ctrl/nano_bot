@@ -1,111 +1,120 @@
-from datetime import datetime, timedelta
-from secrets import token_urlsafe
+from __future__ import annotations
 
+from typing import Optional
+
+from aiogram.types import User as TelegramUser
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import TRIAL_DAYS
-from app.database.models import (
-    Referral,
-    Statistics,
-    Subscription,
-    User,
-    UserSettings,
-)
+from app.database.models import User, UserSettings
+
+
+async def get_user_by_telegram_id(
+    session: AsyncSession,
+    telegram_id: int,
+) -> Optional[User]:
+    """
+    Telegram ID orqali ichki User obyektini topadi.
+
+    MUHIM:
+    telegram_id — Telegram'dagi katta ID.
+    User.id — PostgreSQL ichki ID.
+    Ularni aralashtirmaslik kerak.
+    """
+    result = await session.execute(
+        select(User).where(
+            User.telegram_id == int(telegram_id)
+        )
+    )
+
+    return result.scalar_one_or_none()
 
 
 async def get_or_create_user(
-    db: AsyncSession,
-    telegram_user,
-    referral_code: str | None = None,
-) -> tuple[User, bool]:
+    session: AsyncSession,
+    telegram_user: TelegramUser,
+) -> User:
+    """
+    Telegram foydalanuvchisini bazadan topadi yoki yaratadi.
+    """
 
-    result = await db.execute(
-        select(User).where(
-            User.telegram_id == telegram_user.id
-        )
+    telegram_id = int(telegram_user.id)
+
+    user = await get_user_by_telegram_id(
+        session=session,
+        telegram_id=telegram_id,
     )
 
-    user = result.scalar_one_or_none()
+    if user is None:
+        user = User(
+            telegram_id=telegram_id,
+            username=telegram_user.username,
+            first_name=telegram_user.first_name,
+            last_name=telegram_user.last_name,
+            language="uz",
+            active=True,
+        )
 
-    if user:
+        session.add(user)
+        await session.flush()
+
+        settings = UserSettings(
+            user_id=user.id,
+            language="uz",
+            notifications_enabled=True,
+        )
+
+        session.add(settings)
+
+        await session.flush()
+
+    else:
         user.username = telegram_user.username
         user.first_name = telegram_user.first_name
         user.last_name = telegram_user.last_name
+        user.active = True
 
-        await db.commit()
+        await session.flush()
 
-        return user, False
+    return user
 
-    user = User(
-        telegram_id=telegram_user.id,
-        username=telegram_user.username,
-        first_name=telegram_user.first_name,
-        last_name=telegram_user.last_name,
-        language="uz",
-        is_active=True,
+
+async def get_user_id_by_telegram_id(
+    session: AsyncSession,
+    telegram_id: int,
+) -> Optional[int]:
+    """
+    Telegram ID'dan ichki users.id ni qaytaradi.
+    """
+
+    user = await get_user_by_telegram_id(
+        session=session,
+        telegram_id=telegram_id,
     )
 
-    db.add(user)
+    if user is None:
+        return None
 
-    await db.flush()
+    return user.id
 
-    settings = UserSettings(
-        user_id=user.id,
-        display_first_name=telegram_user.first_name,
-        display_last_name=telegram_user.last_name,
-        language="uz",
+
+async def ensure_user(
+    session: AsyncSession,
+    telegram_user: TelegramUser,
+) -> User:
+    """
+    get_or_create_user uchun qulay wrapper.
+    """
+
+    return await get_or_create_user(
+        session=session,
+        telegram_user=telegram_user,
     )
 
-    statistics = Statistics(
-        user_id=user.id,
-        people_replied=0,
-        total_auto_replies=0,
-        today_replies=0,
-        month_replies=0,
-        last_reset_date=datetime.utcnow(),
-    )
 
-    now = datetime.utcnow()
-
-    subscription = Subscription(
-        user_id=user.id,
-        status="trial",
-        trial_started_at=now,
-        trial_ends_at=now + timedelta(days=TRIAL_DAYS),
-    )
-
-    referral = Referral(
-        user_id=user.id,
-        referral_code=generate_referral_code(),
-        referral_count=0,
-    )
-
-    db.add(settings)
-    db.add(statistics)
-    db.add(subscription)
-    db.add(referral)
-
-    await db.flush()
-
-    # Referral mavjud bo'lsa, uni tekshiramiz.
-    if referral_code:
-        result = await db.execute(
-            select(Referral).where(
-                Referral.referral_code == referral_code
-            )
-        )
-
-        inviter = result.scalar_one_or_none()
-
-        if inviter and inviter.user_id != user.id:
-            inviter.referral_count += 1
-            referral.referred_by = inviter.user_id
-
-    await db.commit()
-
-    return user, True
-
-
-def generate_referral_code() -> str:
-    return token_urlsafe(6).replace("-", "").replace("_", "")[:10]
+__all__ = [
+    "get_user_by_telegram_id",
+    "get_or_create_user",
+    "get_user_id_by_telegram_id",
+    "ensure_user",
+]

@@ -1,9 +1,8 @@
 import asyncio
 import logging
-from datetime import datetime
-from typing import Any
+from typing import Dict, Optional, Set
 
-from sqlalchemy import select
+from telethon import events
 
 from app.database import AsyncSessionLocal
 from app.database.models import (
@@ -11,6 +10,7 @@ from app.database.models import (
     AutoReplyKeyword,
     Statistics,
     TelegramAccount,
+    User,
 )
 from app.telegram.user_client import telegram_client_manager
 
@@ -18,23 +18,27 @@ logger = logging.getLogger(__name__)
 
 
 class AutoReplyEngine:
-    """
-    Ulangan Telegram akkauntlaridagi xabarlarni kuzatadi
-    va mos AutoReplylarni yuboradi.
-    """
-
     def __init__(self) -> None:
         self._running = False
-        self._tasks: dict[int, asyncio.Task] = {}
 
-    # =====================================================
-    # START / STOP
-    # =====================================================
+        # Telegram ID -> asyncio task
+        self._tasks: Dict[int, asyncio.Task] = {}
+
+        # Telegram ID -> handler
+        self._handlers: Dict[int, object] = {}
+
+        # Bir akkauntga bir nechta listener
+        # ulanib qolishining oldini olish.
+        self._registered_accounts: Set[int] = set()
+
+    # ---------------------------------------------------------
+    # START
+    # ---------------------------------------------------------
 
     async def start(self) -> None:
         """
-        Database'dagi barcha ulangan Telegram akkauntlar
-        uchun listenerlarni ishga tushiradi.
+        Server ishga tushganda barcha ulangan
+        Telegram akkauntlar uchun engine'ni ishga tushiradi.
         """
 
         if self._running:
@@ -42,476 +46,495 @@ class AutoReplyEngine:
 
         self._running = True
 
+        logger.info("AutoReplyEngine starting...")
+
         async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(TelegramAccount).where(
-                    TelegramAccount.is_connected.is_(True)
+            accounts = (
+                await self._get_connected_accounts(session)
+            )
+
+        for account_id, db_user_id, telegram_id in accounts:
+            try:
+                await self.start_for_user(
+                    telegram_id=telegram_id,
+                    db_user_id=db_user_id,
+                    account_id=account_id,
                 )
-            )
-
-            accounts = result.scalars().all()
-
-        for account in accounts:
-            await self.start_for_user(
-                account.user_id
-            )
+            except Exception:
+                logger.exception(
+                    "Failed to start AutoReplyEngine "
+                    "for telegram_id=%s",
+                    telegram_id,
+                )
 
         logger.info(
-            "AutoReply Engine ishga tushdi. "
-            "Ulangan akkauntlar: %s",
+            "AutoReplyEngine started. Accounts=%s",
             len(accounts),
         )
 
+    # ---------------------------------------------------------
+    # GET CONNECTED ACCOUNTS
+    # ---------------------------------------------------------
+
+    async def _get_connected_accounts(
+        self,
+        session,
+    ):
+        """
+        Return:
+            account_id,
+            users.id,
+            users.telegram_id
+
+        Muhim:
+        Telegram ID va DB user ID alohida olinadi.
+        """
+
+        result = await session.execute(
+            (
+                TelegramAccount,
+                User,
+            )
+        )
+
+        # Yuqoridagi tuple-select turli SQLAlchemy
+        # versiyalarida noqulay bo‘lishi mumkin.
+        # Shuning uchun explicit query ishlatamiz.
+        from sqlalchemy import select
+
+        result = await session.execute(
+            select(
+                TelegramAccount.id,
+                TelegramAccount.user_id,
+                User.telegram_id,
+            )
+            .join(
+                User,
+                User.id == TelegramAccount.user_id,
+            )
+            .where(
+                TelegramAccount.is_connected.is_(True)
+            )
+        )
+
+        return result.all()
+
+    # ---------------------------------------------------------
+    # START FOR USER
+    # ---------------------------------------------------------
+
     async def start_for_user(
         self,
-        user_id: int,
-    ) -> bool:
+        telegram_id: int,
+        db_user_id: int,
+        account_id: Optional[int] = None,
+    ) -> None:
         """
-        Bitta user uchun Telegram listenerni ishga tushiradi.
+        AutoReply listener'ni bitta Telegram akkauntga ulaydi.
+
+        telegram_id:
+            Telethon client manager uchun.
+
+        db_user_id:
+            PostgreSQL foreign key uchun.
+
+        account_id:
+            TelegramAccount.id.
         """
 
-        if user_id in self._tasks:
-            task = self._tasks[user_id]
+        telegram_id = int(telegram_id)
+        db_user_id = int(db_user_id)
 
-            if not task.done():
-                return True
+        if telegram_id in self._registered_accounts:
+            logger.info(
+                "AutoReplyEngine already running "
+                "for telegram_id=%s",
+                telegram_id,
+            )
+            return
 
-        if not self._running:
-            return False
-
-        client = (
-            await telegram_client_manager
-            .get_client(user_id)
+        client = telegram_client_manager.get_client(
+            telegram_id
         )
 
         if client is None:
             logger.warning(
-                "AutoReply: user %s uchun "
-                "Telegram client mavjud emas.",
-                user_id,
+                "Telethon client not found "
+                "for telegram_id=%s",
+                telegram_id,
             )
-            return False
+            return
 
         try:
-            from telethon import events
+            if not await client.is_user_authorized():
+                logger.warning(
+                    "Telegram client is not authorized "
+                    "for telegram_id=%s",
+                    telegram_id,
+                )
+                return
+        except Exception:
+            logger.exception(
+                "Authorization check failed "
+                "for telegram_id=%s",
+                telegram_id,
+            )
+            return
 
-            async def handler(event):
-                await self.handle_message(
-                    user_id=user_id,
-                    event=event,
+        async def handler(event) -> None:
+            await self._handle_message(
+                event=event,
+                telegram_id=telegram_id,
+                db_user_id=db_user_id,
+                account_id=account_id,
+            )
+
+        client.add_event_handler(
+            handler,
+            events.NewMessage(incoming=True),
+        )
+
+        self._handlers[telegram_id] = handler
+        self._registered_accounts.add(telegram_id)
+
+        logger.info(
+            "AutoReply listener registered "
+            "for telegram_id=%s, db_user_id=%s",
+            telegram_id,
+            db_user_id,
+        )
+
+    # ---------------------------------------------------------
+    # HANDLE MESSAGE
+    # ---------------------------------------------------------
+
+    async def _handle_message(
+        self,
+        event,
+        telegram_id: int,
+        db_user_id: int,
+        account_id: Optional[int],
+    ) -> None:
+
+        try:
+            message = event.message
+
+            if message is None:
+                return
+
+            # Outgoing xabarlarni o'tkazib yuboramiz.
+            if getattr(message, "out", False):
+                return
+
+            text = message.raw_text or ""
+
+            if not text.strip():
+                return
+
+            text_normalized = text.casefold().strip()
+
+            async with AsyncSessionLocal() as session:
+
+                # Faqat shu userga tegishli aktiv
+                # auto reply'larni olamiz.
+                query = (
+                    select(AutoReply)
+                    .where(
+                        AutoReply.user_id == db_user_id
+                    )
+                    .where(
+                        AutoReply.is_active.is_(True)
+                    )
                 )
 
-            client.add_event_handler(
-                handler,
-                events.NewMessage(
-                    incoming=True
-                ),
-            )
+                if account_id is not None:
+                    query = query.where(
+                        (
+                            AutoReply.telegram_account_id
+                            == account_id
+                        )
+                        |
+                        (
+                            AutoReply.telegram_account_id
+                            .is_(None)
+                        )
+                    )
 
-            task = asyncio.create_task(
-                self._run_client(
-                    user_id=user_id,
-                    client=client,
-                )
-            )
+                result = await session.execute(query)
 
-            self._tasks[user_id] = task
+                auto_replies = result.scalars().all()
 
-            logger.info(
-                "AutoReply listener ishga tushdi: "
-                "user=%s",
-                user_id,
-            )
+                if not auto_replies:
+                    return
 
-            return True
+                matched = False
+
+                for auto_reply in auto_replies:
+
+                    keyword_result = await session.execute(
+                        select(
+                            AutoReplyKeyword
+                        ).where(
+                            AutoReplyKeyword.auto_reply_id
+                            == auto_reply.id
+                        )
+                    )
+
+                    keywords = (
+                        keyword_result.scalars().all()
+                    )
+
+                    for keyword in keywords:
+                        keyword_text = (
+                            keyword.keyword or ""
+                        ).strip().casefold()
+
+                        if not keyword_text:
+                            continue
+
+                        if keyword_text in text_normalized:
+                            matched = True
+
+                            await self._send_reply(
+                                client=(
+                                    telegram_client_manager
+                                    .get_client(
+                                        telegram_id
+                                    )
+                                ),
+                                event=event,
+                                auto_reply=auto_reply,
+                            )
+
+                            await self._update_statistics(
+                                session=session,
+                                db_user_id=db_user_id,
+                            )
+
+                            break
+
+                    if matched:
+                        break
+
+                await session.commit()
 
         except Exception:
             logger.exception(
-                "AutoReply listener ishga tushmadi: "
-                "user=%s",
-                user_id,
+                "AutoReplyEngine message handler failed "
+                "for telegram_id=%s",
+                telegram_id,
             )
 
-            return False
+    # ---------------------------------------------------------
+    # SEND REPLY
+    # ---------------------------------------------------------
+
+    async def _send_reply(
+        self,
+        client,
+        event,
+        auto_reply: AutoReply,
+    ) -> None:
+
+        if client is None:
+            logger.warning(
+                "Cannot send auto reply: client is None"
+            )
+            return
+
+        message_type = (
+            auto_reply.message_type or "text"
+        )
+
+        if message_type == "text":
+            text = auto_reply.message_text or ""
+
+            if text:
+                await event.respond(text)
+
+        elif message_type == "photo":
+            if auto_reply.file_id:
+                await client.send_file(
+                    event.chat_id,
+                    auto_reply.file_id,
+                    caption=auto_reply.message_text or None,
+                )
+
+        elif message_type == "video":
+            if auto_reply.file_id:
+                await client.send_file(
+                    event.chat_id,
+                    auto_reply.file_id,
+                    caption=auto_reply.message_text or None,
+                )
+
+        elif message_type == "document":
+            if auto_reply.file_id:
+                await client.send_file(
+                    event.chat_id,
+                    auto_reply.file_id,
+                    caption=auto_reply.message_text or None,
+                )
+
+        elif message_type == "link":
+            if auto_reply.link:
+                await event.respond(
+                    auto_reply.link
+                )
+
+        else:
+            logger.warning(
+                "Unknown auto reply message_type=%s",
+                message_type,
+            )
+
+    # ---------------------------------------------------------
+    # STATISTICS
+    # ---------------------------------------------------------
+
+    async def _update_statistics(
+        self,
+        session,
+        db_user_id: int,
+    ) -> None:
+
+        from sqlalchemy import select
+
+        result = await session.execute(
+            select(Statistics).where(
+                Statistics.user_id == db_user_id
+            )
+        )
+
+        statistics = result.scalar_one_or_none()
+
+        if statistics is None:
+            statistics = Statistics(
+                user_id=db_user_id,
+                replied_people=0,
+                auto_replies=0,
+                first_messages_sent=0,
+            )
+
+            session.add(statistics)
+
+        statistics.auto_replies = (
+            statistics.auto_replies + 1
+        )
+
+        statistics.replied_people = (
+            statistics.replied_people + 1
+        )
+
+    # ---------------------------------------------------------
+    # STOP FOR USER
+    # ---------------------------------------------------------
 
     async def stop_for_user(
         self,
-        user_id: int,
+        telegram_id: int,
     ) -> None:
-        """
-        Bitta user listenerini to'xtatadi.
-        """
 
-        task = self._tasks.pop(
-            user_id,
+        telegram_id = int(telegram_id)
+
+        client = telegram_client_manager.get_client(
+            telegram_id
+        )
+
+        handler = self._handlers.get(
+            telegram_id
+        )
+
+        if client is not None and handler is not None:
+            try:
+                client.remove_event_handler(
+                    handler
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to remove event handler "
+                    "for telegram_id=%s",
+                    telegram_id,
+                )
+
+        self._handlers.pop(
+            telegram_id,
             None,
         )
 
-        if task and not task.done():
+        self._registered_accounts.discard(
+            telegram_id
+        )
+
+        task = self._tasks.pop(
+            telegram_id,
+            None,
+        )
+
+        if task is not None:
             task.cancel()
 
             try:
                 await task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                logger.exception(
+                    "AutoReply task shutdown failed "
+                    "for telegram_id=%s",
+                    telegram_id,
+                )
 
         logger.info(
-            "AutoReply listener to'xtatildi: user=%s",
-            user_id,
+            "AutoReplyEngine stopped "
+            "for telegram_id=%s",
+            telegram_id,
         )
 
+    # ---------------------------------------------------------
+    # STOP ALL
+    # ---------------------------------------------------------
+
     async def stop(self) -> None:
-        """
-        Barcha listenerlarni to'xtatadi.
-        """
+
+        if not self._running:
+            return
 
         self._running = False
 
-        user_ids = list(
-            self._tasks.keys()
+        telegram_ids = list(
+            self._registered_accounts
         )
 
-        for user_id in user_ids:
-            await self.stop_for_user(
-                user_id
-            )
+        for telegram_id in telegram_ids:
+            try:
+                await self.stop_for_user(
+                    telegram_id
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to stop AutoReplyEngine "
+                    "for telegram_id=%s",
+                    telegram_id,
+                )
+
+        self._tasks.clear()
+        self._handlers.clear()
+        self._registered_accounts.clear()
 
         logger.info(
-            "AutoReply Engine to'xtatildi."
+            "AutoReplyEngine stopped."
         )
 
-    async def _run_client(
-        self,
-        user_id: int,
-        client: Any,
-    ) -> None:
-        """
-        Telethon clientni listener rejimida ushlab turadi.
-        """
 
-        try:
-            await client.run_until_disconnected()
-
-        except asyncio.CancelledError:
-            raise
-
-        except Exception:
-            logger.exception(
-                "Telegram client uzildi: user=%s",
-                user_id,
-            )
-
-        finally:
-            self._tasks.pop(
-                user_id,
-                None,
-            )
-
-    # =====================================================
-    # MESSAGE PROCESSING
-    # =====================================================
-
-    async def handle_message(
-        self,
-        user_id: int,
-        event: Any,
-    ) -> None:
-        """
-        Kelgan Telegram xabarini tekshiradi.
-        """
-
-        try:
-            message = event.message
-
-            if not message:
-                return
-
-            # O'zimiz yuborgan xabarlarni qayta
-            # process qilmaymiz.
-            if getattr(
-                message,
-                "out",
-                False,
-            ):
-                return
-
-            text = (
-                getattr(
-                    message,
-                    "message",
-                    None,
-                )
-                or ""
-            )
-
-            text = text.strip()
-
-            # Bo'sh media xabarlar uchun ham
-            # keyword topish mumkin emas.
-            if not text:
-                return
-
-            matched_reply = (
-                await self.find_matching_reply(
-                    user_id=user_id,
-                    text=text,
-                )
-            )
-
-            if not matched_reply:
-                return
-
-            await self.send_reply(
-                user_id=user_id,
-                event=event,
-                auto_reply=matched_reply,
-            )
-
-            sender_id = None
-
-            try:
-                sender_id = await event.get_sender()
-
-                if sender_id:
-                    sender_id = sender_id.id
-
-            except Exception:
-                pass
-
-            await self.update_statistics(
-                user_id=user_id,
-                sender_id=sender_id,
-            )
-
-            logger.info(
-                "AutoReply yuborildi: "
-                "user=%s reply_id=%s",
-                user_id,
-                matched_reply.id,
-            )
-
-        except Exception:
-            logger.exception(
-                "AutoReply xabarni qayta ishlashda "
-                "xatolik: user=%s",
-                user_id,
-            )
-
-    # =====================================================
-    # KEYWORD MATCHING
-    # =====================================================
-
-    async def find_matching_reply(
-        self,
-        user_id: int,
-        text: str,
-    ) -> AutoReply | None:
-        """
-        Keyword bo'yicha mos AutoReplyni topadi.
-
-        Matching:
-        - katta/kichik harf farqsiz
-        - keyword matn ichida bo'lsa ishlaydi
-        """
-
-        normalized_text = (
-            text.casefold().strip()
-        )
-
-        async with AsyncSessionLocal() as session:
-
-            result = await session.execute(
-                select(AutoReply)
-                .where(
-                    AutoReply.user_id == user_id,
-                    AutoReply.is_active.is_(True),
-                )
-                .order_by(
-                    AutoReply.id.asc()
-                )
-            )
-
-            replies = result.scalars().all()
-
-            for reply in replies:
-
-                keyword_result = (
-                    await session.execute(
-                        select(AutoReplyKeyword).where(
-                            AutoReplyKeyword.auto_reply_id
-                            == reply.id
-                        )
-                    )
-                )
-
-                keywords = (
-                    keyword_result.scalars().all()
-                )
-
-                for keyword in keywords:
-
-                    value = (
-                        keyword.keyword
-                        .casefold()
-                        .strip()
-                    )
-
-                    if not value:
-                        continue
-
-                    if value in normalized_text:
-                        return reply
-
-        return None
-
-    # =====================================================
-    # SEND REPLY
-    # =====================================================
-
-    async def send_reply(
-        self,
-        user_id: int,
-        event: Any,
-        auto_reply: AutoReply,
-    ) -> None:
-        """
-        AutoReply turiga qarab Telegramga javob yuboradi.
-        """
-
-        client = (
-            await telegram_client_manager
-            .get_client(user_id)
-        )
-
-        if client is None:
-            return
-
-        chat = await event.get_chat()
-
-        message_type = (
-            auto_reply.message_type
-        )
-
-        text = (
-            auto_reply.message_text
-            or ""
-        )
-
-        # -------------------------------------------------
-        # TEXT
-        # -------------------------------------------------
-
-        if message_type == "text":
-
-            if not text:
-                return
-
-            await client.send_message(
-                chat,
-                text,
-                reply_to=event.message.id,
-            )
-
-            return
-
-        # -------------------------------------------------
-        # PHOTO / VIDEO / DOCUMENT
-        # -------------------------------------------------
-
-        if message_type in {
-            "photo",
-            "video",
-            "document",
-        }:
-
-            if not auto_reply.file_id:
-                return
-
-            caption = text or None
-
-            await client.send_file(
-                chat,
-                auto_reply.file_id,
-                caption=caption,
-                reply_to=event.message.id,
-            )
-
-            return
-
-        # -------------------------------------------------
-        # LINK
-        # -------------------------------------------------
-
-        if message_type == "link":
-
-            if not auto_reply.link:
-                return
-
-            await client.send_message(
-                chat,
-                auto_reply.link,
-                reply_to=event.message.id,
-            )
-
-            return
-
-        logger.warning(
-            "Noma'lum AutoReply turi: %s",
-            message_type,
-        )
-
-    # =====================================================
-    # STATISTICS
-    # =====================================================
-
-    async def update_statistics(
-        self,
-        user_id: int,
-        sender_id: int | None,
-    ) -> None:
-        """
-        Faqat statistika hisoblagichlarini yangilaydi.
-
-        Xabar mazmuni saqlanmaydi.
-        """
-
-        async with AsyncSessionLocal() as session:
-
-            result = await session.execute(
-                select(Statistics).where(
-                    Statistics.user_id
-                    == user_id
-                )
-            )
-
-            statistics = (
-                result.scalar_one_or_none()
-            )
-
-            if not statistics:
-                statistics = Statistics(
-                    user_id=user_id,
-                    people_replied=0,
-                    total_auto_replies=0,
-                    today_replies=0,
-                    month_replies=0,
-                )
-
-                session.add(statistics)
-
-            statistics.total_auto_replies += 1
-            statistics.today_replies += 1
-            statistics.month_replies += 1
-
-            # people_replied uchun sender ID
-            # alohida jadvalda saqlanmaydi.
-            #
-            # Talab bo'yicha suhbat mazmuni saqlanmaydi.
-            # Shu sabab bu hisoblagich auto-reply
-            # yuborilgan holatda oshiriladi.
-            statistics.people_replied += 1
-
-            await session.commit()
-
+# -------------------------------------------------------------
+# SINGLETON
+# -------------------------------------------------------------
 
 auto_reply_engine = AutoReplyEngine()
+
+
+__all__ = [
+    "AutoReplyEngine",
+    "auto_reply_engine",
+]

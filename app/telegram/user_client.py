@@ -1,56 +1,44 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Dict, Optional
 
 from telethon import TelegramClient
 from telethon.errors import (
-    FloodWaitError,
-    PasswordHashInvalidError,
     PhoneCodeExpiredError,
     PhoneCodeInvalidError,
     SessionPasswordNeededError,
 )
 
-from app.config import TELEGRAM_API_HASH, TELEGRAM_API_ID
+from app.config import (
+    TELEGRAM_API_HASH,
+    TELEGRAM_API_ID,
+    TELEGRAM_SESSION_DIR,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramClientManager:
     """
-    Nano-Bot foydalanuvchilarining shaxsiy Telegram
-    akkauntlarini boshqaradi.
+    Foydalanuvchilarning shaxsiy Telegram akkauntlarini
+    Telethon orqali boshqaradi.
 
-    Session fayllari database'ga emas, serverdagi
-    alohida papkaga saqlanadi.
+    DIQQAT:
+    Bu yerda user_id sifatida Telegram ID ishlatiladi.
+
+    Database foreign key uchun esa users.id ishlatiladi.
     """
 
     def __init__(self) -> None:
-        if not TELEGRAM_API_ID:
-            raise RuntimeError(
-                "TELEGRAM_API_ID .env faylida belgilanmagan."
-            )
-
-        if not TELEGRAM_API_HASH:
-            raise RuntimeError(
-                "TELEGRAM_API_HASH .env faylida belgilanmagan."
-            )
-
-        self.api_id = int(
-            TELEGRAM_API_ID
-        )
-
-        self.api_hash = (
-            TELEGRAM_API_HASH
-        )
+        self.api_id = int(TELEGRAM_API_ID)
+        self.api_hash = TELEGRAM_API_HASH
 
         self.session_dir = Path(
-            os.getenv(
-                "TELEGRAM_SESSION_DIR",
-                "/opt/nano_bot/sessions",
-            )
+            TELEGRAM_SESSION_DIR
         )
 
         self.session_dir.mkdir(
@@ -58,67 +46,81 @@ class TelegramClientManager:
             exist_ok=True,
         )
 
-        self.clients: dict[
+        try:
+            os.chmod(
+                self.session_dir,
+                0o700,
+            )
+        except OSError:
+            pass
+
+        # Telegram ID -> active client
+        self.clients: Dict[
             int,
             TelegramClient,
         ] = {}
 
-        self.pending_clients: dict[
+        # Telegram ID -> temporary login client
+        self.pending_clients: Dict[
             int,
             TelegramClient,
         ] = {}
 
-        self.pending_phones: dict[
+        # Telegram ID -> phone number
+        self.pending_phones: Dict[
             int,
             str,
         ] = {}
 
-        self._locks: dict[
+        # Har bir Telegram ID uchun alohida lock
+        self.locks: Dict[
             int,
             asyncio.Lock,
         ] = {}
 
-    # =====================================================
-    # LOCK
-    # =====================================================
+    # =========================================================
+    # INTERNAL HELPERS
+    # =========================================================
 
     def _get_lock(
         self,
-        user_id: int,
+        telegram_id: int,
     ) -> asyncio.Lock:
+        telegram_id = int(telegram_id)
 
-        if user_id not in self._locks:
-            self._locks[user_id] = (
-                asyncio.Lock()
-            )
+        if telegram_id not in self.locks:
+            self.locks[telegram_id] = asyncio.Lock()
 
-        return self._locks[user_id]
-
-    # =====================================================
-    # SESSION PATH
-    # =====================================================
+        return self.locks[telegram_id]
 
     def _session_path(
         self,
-        user_id: int,
+        telegram_id: int,
     ) -> str:
+        """
+        Session fayl nomi faqat Telegram ID asosida yaratiladi.
+        """
+
+        telegram_id = int(telegram_id)
 
         return str(
-            self.session_dir
-            / f"user_{user_id}"
+            self.session_dir / f"{telegram_id}.session"
         )
-
-    # =====================================================
-    # CREATE CLIENT
-    # =====================================================
 
     def _create_client(
         self,
-        user_id: int,
+        telegram_id: int,
     ) -> TelegramClient:
+        """
+        Yangi Telethon client yaratadi.
+        """
 
-        return TelegramClient(
-            self._session_path(user_id),
+        session_path = self._session_path(
+            telegram_id
+        )
+
+        client = TelegramClient(
+            session_path,
             self.api_id,
             self.api_hash,
             device_model="Nano-Bot",
@@ -128,407 +130,379 @@ class TelegramClientManager:
             system_lang_code="en",
         )
 
-    # =====================================================
+        return client
+
+    # =========================================================
     # GET CLIENT
-    # =====================================================
+    # =========================================================
 
-    async def get_client(
+    def get_client(
         self,
-        user_id: int,
-    ) -> TelegramClient | None:
+        telegram_id: int,
+    ) -> Optional[TelegramClient]:
+        """
+        Active Telegram clientni qaytaradi.
+        """
 
-        if user_id in self.clients:
-            return self.clients[user_id]
+        telegram_id = int(telegram_id)
 
-        session_file = (
-            Path(
-                self._session_path(
-                    user_id
-                )
-            ).with_suffix(".session")
+        return self.clients.get(
+            telegram_id
         )
 
-        if not session_file.exists():
-            return None
-
-        client = self._create_client(
-            user_id
-        )
-
-        try:
-            await client.connect()
-
-            if not await client.is_user_authorized():
-                await client.disconnect()
-                return None
-
-            self.clients[user_id] = client
-
-            return client
-
-        except Exception:
-            logger.exception(
-                "Telegram clientni ulashda xatolik: "
-                "user=%s",
-                user_id,
-            )
-
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
-
-            return None
-
-    # =====================================================
+    # =========================================================
     # START PHONE LOGIN
-    # =====================================================
+    # =========================================================
 
     async def start_phone_login(
         self,
-        user_id: int,
+        telegram_id: int,
         phone: str,
-    ) -> dict[str, Any]:
+    ) -> bool:
+        """
+        Telefon raqam orqali login jarayonini boshlaydi.
 
-        lock = self._get_lock(user_id)
+        Telegram'dan login kodi yuboriladi.
+        """
+
+        telegram_id = int(telegram_id)
+
+        lock = self._get_lock(
+            telegram_id
+        )
 
         async with lock:
 
-            try:
-                old_client = (
-                    self.pending_clients.get(
-                        user_id
+            # Eski pending client bo‘lsa,
+            # uni yopamiz.
+            old_client = self.pending_clients.get(
+                telegram_id
+            )
+
+            if old_client is not None:
+                try:
+                    await old_client.disconnect()
+                except Exception:
+                    logger.exception(
+                        "Failed to disconnect old pending client"
                     )
-                )
 
-                if old_client:
-                    try:
-                        await old_client.disconnect()
-                    except Exception:
-                        pass
+            client = self._create_client(
+                telegram_id
+            )
 
-                client = self._create_client(
-                    user_id
-                )
+            await client.connect()
 
-                await client.connect()
-
-                if await client.is_user_authorized():
-
-                    self.clients[user_id] = client
-
-                    return {
-                        "status": "already_authorized",
-                        "telegram_id": (
-                            await self._get_telegram_id(
-                                client
-                            )
-                        ),
-                    }
-
+            try:
                 await client.send_code_request(
                     phone
                 )
+            except Exception:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
-                self.pending_clients[
-                    user_id
-                ] = client
+                raise
 
-                self.pending_phones[
-                    user_id
-                ] = phone
+            self.pending_clients[
+                telegram_id
+            ] = client
 
-                return {
-                    "status": "code_sent"
-                }
+            self.pending_phones[
+                telegram_id
+            ] = phone
 
-            except FloodWaitError as error:
+            logger.info(
+                "Telegram login code requested: telegram_id=%s",
+                telegram_id,
+            )
 
-                return {
-                    "status": "flood_wait",
-                    "seconds": error.seconds,
-                }
+            return True
 
-            except Exception as error:
-
-                logger.exception(
-                    "Telegram code yuborishda "
-                    "xatolik: user=%s",
-                    user_id,
-                )
-
-                return {
-                    "status": "error",
-                    "error": str(error),
-                }
-
-    # =====================================================
+    # =========================================================
     # SIGN IN CODE
-    # =====================================================
+    # =========================================================
 
     async def sign_in_code(
         self,
-        user_id: int,
-        phone: str,
+        telegram_id: int,
         code: str,
-    ) -> dict[str, Any]:
+    ) -> bool:
+        """
+        Telegram tomonidan yuborilgan login kodini
+        tekshiradi.
 
-        client = self.pending_clients.get(
-            user_id
+        Agar 2FA yoqilgan bo‘lsa:
+        SessionPasswordNeededError qaytaradi.
+        """
+
+        telegram_id = int(telegram_id)
+
+        lock = self._get_lock(
+            telegram_id
         )
 
-        if client is None:
-            return {
-                "status": "session_not_found"
-            }
+        async with lock:
 
-        try:
-
-            await client.sign_in(
-                phone=phone,
-                code=code,
+            client = self.pending_clients.get(
+                telegram_id
             )
 
-            telegram_id = (
-                await self._get_telegram_id(
-                    client
+            phone = self.pending_phones.get(
+                telegram_id
+            )
+
+            if client is None or phone is None:
+                raise RuntimeError(
+                    "Login sessiyasi topilmadi. "
+                    "Qaytadan telefon raqamingizni yuboring."
                 )
+
+            try:
+                await client.sign_in(
+                    phone=phone,
+                    code=code.strip(),
+                )
+
+            except SessionPasswordNeededError:
+                logger.info(
+                    "2FA password required: telegram_id=%s",
+                    telegram_id,
+                )
+
+                raise
+
+            except PhoneCodeInvalidError:
+                logger.warning(
+                    "Invalid Telegram login code: telegram_id=%s",
+                    telegram_id,
+                )
+
+                raise
+
+            except PhoneCodeExpiredError:
+                logger.warning(
+                    "Expired Telegram login code: telegram_id=%s",
+                    telegram_id,
+                )
+
+                raise
+
+            await self._activate_client(
+                telegram_id,
+                client,
             )
 
-            self.clients[user_id] = client
-
-            self.pending_clients.pop(
-                user_id,
-                None,
+            logger.info(
+                "Telegram login successful: telegram_id=%s",
+                telegram_id,
             )
 
-            self.pending_phones.pop(
-                user_id,
-                None,
-            )
+            return True
 
-            return {
-                "status": "authorized",
-                "telegram_id": telegram_id,
-                "username": (
-                    await self._get_username(
-                        client
-                    )
-                ),
-            }
-
-        except SessionPasswordNeededError:
-
-            return {
-                "status": "password_required"
-            }
-
-        except PhoneCodeInvalidError:
-
-            return {
-                "status": "invalid_code"
-            }
-
-        except PhoneCodeExpiredError:
-
-            await self._cleanup_pending(
-                user_id
-            )
-
-            return {
-                "status": "expired_code"
-            }
-
-        except FloodWaitError as error:
-
-            return {
-                "status": "flood_wait",
-                "seconds": error.seconds,
-            }
-
-        except Exception as error:
-
-            logger.exception(
-                "Telegram code login error: "
-                "user=%s",
-                user_id,
-            )
-
-            return {
-                "status": "error",
-                "error": str(error),
-            }
-
-    # =====================================================
+    # =========================================================
     # SIGN IN PASSWORD
-    # =====================================================
+    # =========================================================
 
     async def sign_in_password(
         self,
-        user_id: int,
+        telegram_id: int,
         password: str,
-    ) -> dict[str, Any]:
+    ) -> bool:
+        """
+        Telegram 2FA parolini tekshiradi.
+        """
 
-        client = self.pending_clients.get(
-            user_id
+        telegram_id = int(telegram_id)
+
+        lock = self._get_lock(
+            telegram_id
         )
 
-        if client is None:
-            return {
-                "status": "session_not_found"
-            }
+        async with lock:
 
-        try:
+            client = self.pending_clients.get(
+                telegram_id
+            )
+
+            if client is None:
+                raise RuntimeError(
+                    "Login sessiyasi topilmadi. "
+                    "Qaytadan login jarayonini boshlang."
+                )
 
             await client.sign_in(
                 password=password
             )
 
-            telegram_id = (
-                await self._get_telegram_id(
-                    client
+            await self._activate_client(
+                telegram_id,
+                client,
+            )
+
+            logger.info(
+                "Telegram 2FA login successful: telegram_id=%s",
+                telegram_id,
+            )
+
+            return True
+
+    # =========================================================
+    # ACTIVATE CLIENT
+    # =========================================================
+
+    async def _activate_client(
+        self,
+        telegram_id: int,
+        client: TelegramClient,
+    ) -> None:
+        """
+        Pending clientni active clientga aylantiradi.
+        """
+
+        telegram_id = int(telegram_id)
+
+        old_client = self.clients.get(
+            telegram_id
+        )
+
+        if old_client is not None and old_client is not client:
+            try:
+                await old_client.disconnect()
+            except Exception:
+                logger.exception(
+                    "Failed to disconnect old active client"
                 )
-            )
 
-            self.clients[user_id] = client
+        self.clients[
+            telegram_id
+        ] = client
 
-            self.pending_clients.pop(
-                user_id,
-                None,
-            )
+        self.pending_clients.pop(
+            telegram_id,
+            None,
+        )
 
-            self.pending_phones.pop(
-                user_id,
-                None,
-            )
+        self.pending_phones.pop(
+            telegram_id,
+            None,
+        )
 
-            return {
-                "status": "authorized",
-                "telegram_id": telegram_id,
-                "username": (
-                    await self._get_username(
-                        client
-                    )
+        try:
+            os.chmod(
+                self._session_path(
+                    telegram_id
                 ),
-            }
-
-        except PasswordHashInvalidError:
-
-            return {
-                "status": "invalid_password"
-            }
-
-        except FloodWaitError as error:
-
-            return {
-                "status": "flood_wait",
-                "seconds": error.seconds,
-            }
-
-        except Exception as error:
-
-            logger.exception(
-                "Telegram 2FA error: user=%s",
-                user_id,
+                0o600,
             )
+        except OSError:
+            pass
 
-            return {
-                "status": "error",
-                "error": str(error),
-            }
-
-    # =====================================================
+    # =========================================================
     # GET ME
-    # =====================================================
+    # =========================================================
 
     async def get_me(
         self,
-        user_id: int,
-    ) -> Any | None:
+        telegram_id: int,
+    ):
+        """
+        Ulangan Telegram akkaunt ma'lumotlarini qaytaradi.
+        """
 
-        client = await self.get_client(
-            user_id
+        telegram_id = int(telegram_id)
+
+        client = self.get_client(
+            telegram_id
         )
 
         if client is None:
             return None
 
-        try:
-            return await client.get_me()
+        if not client.is_connected():
+            await client.connect()
 
-        except Exception:
-            logger.exception(
-                "get_me xatosi: user=%s",
-                user_id,
-            )
-
+        if not await client.is_user_authorized():
             return None
 
-    # =====================================================
-    # AUTHORIZED
-    # =====================================================
+        return await client.get_me()
+
+    # =========================================================
+    # IS AUTHORIZED
+    # =========================================================
 
     async def is_authorized(
         self,
-        user_id: int,
+        telegram_id: int,
     ) -> bool:
+        telegram_id = int(telegram_id)
 
-        client = await self.get_client(
-            user_id
+        client = self.get_client(
+            telegram_id
         )
 
         if client is None:
             return False
 
         try:
+            if not client.is_connected():
+                await client.connect()
+
             return await client.is_user_authorized()
 
         except Exception:
+            logger.exception(
+                "Authorization check failed: telegram_id=%s",
+                telegram_id,
+            )
+
             return False
 
-    # =====================================================
+    # =========================================================
     # LOGOUT
-    # =====================================================
+    # =========================================================
 
     async def logout(
         self,
-        user_id: int,
+        telegram_id: int,
     ) -> bool:
+        """
+        Telegram akkauntini logout qiladi.
+        """
 
-        lock = self._get_lock(user_id)
+        telegram_id = int(telegram_id)
+
+        lock = self._get_lock(
+            telegram_id
+        )
 
         async with lock:
 
             client = self.clients.pop(
-                user_id,
+                telegram_id,
                 None,
             )
 
-            if client is None:
-                client = (
-                    self.pending_clients.pop(
-                        user_id,
-                        None,
-                    )
-                )
+            pending_client = self.pending_clients.pop(
+                telegram_id,
+                None,
+            )
 
             self.pending_phones.pop(
-                user_id,
+                telegram_id,
                 None,
             )
 
-            if client:
-
+            # Active client
+            if client is not None:
                 try:
-
-                    if await client.is_connected():
+                    if client.is_connected():
                         await client.log_out()
-
                 except Exception:
                     logger.exception(
-                        "Telegram logout xatosi: "
-                        "user=%s",
-                        user_id,
+                        "Telegram logout failed: telegram_id=%s",
+                        telegram_id,
                     )
 
                 try:
@@ -536,187 +510,160 @@ class TelegramClientManager:
                 except Exception:
                     pass
 
-            session_file = Path(
-                self._session_path(
-                    user_id
-                )
-            ).with_suffix(".session")
-
-            if session_file.exists():
+            # Pending client
+            if (
+                pending_client is not None
+                and pending_client is not client
+            ):
                 try:
-                    session_file.unlink()
+                    await pending_client.disconnect()
                 except Exception:
-                    logger.exception(
-                        "Session faylini o'chirishda "
-                        "xatolik: user=%s",
-                        user_id,
-                    )
+                    pass
+
+            logger.info(
+                "Telegram client logged out: telegram_id=%s",
+                telegram_id,
+            )
 
             return True
 
-    # =====================================================
-    # CLEANUP
-    # =====================================================
+    # =========================================================
+    # LOAD EXISTING SESSIONS
+    # =========================================================
 
-    async def _cleanup_pending(
-        self,
-        user_id: int,
-    ) -> None:
+    async def load_existing_sessions(self) -> None:
+        """
+        Server qayta ishga tushganda mavjud .session
+        fayllarni yuklaydi.
 
-        client = self.pending_clients.pop(
-            user_id,
-            None,
-        )
+        Faqat haqiqiy Telegram session fayllari yuklanadi.
+        """
 
-        self.pending_phones.pop(
-            user_id,
-            None,
-        )
-
-        if client:
-
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
-
-    # =====================================================
-    # HELPERS
-    # =====================================================
-
-    async def _get_telegram_id(
-        self,
-        client: TelegramClient,
-    ) -> int:
-
-        me = await client.get_me()
-
-        if not me:
-            raise RuntimeError(
-                "Telegram user ma'lumotlari olinmadi."
-            )
-
-        return int(me.id)
-
-    async def _get_username(
-        self,
-        client: TelegramClient,
-    ) -> str | None:
-
-        me = await client.get_me()
-
-        if not me:
-            return None
-
-        return getattr(
-            me,
-            "username",
-            None,
-        )
-
-    # =====================================================
-    # START EXISTING SESSIONS
-    # =====================================================
-
-    async def load_existing_sessions(
-        self,
-    ) -> list[int]:
-
-        loaded_users: list[int] = []
+        if not self.session_dir.exists():
+            return
 
         session_files = list(
-            self.session_dir.glob(
-                "*.session"
-            )
+            self.session_dir.glob("*.session")
         )
+
+        if not session_files:
+            logger.info(
+                "No existing Telegram sessions found."
+            )
+            return
+
+        loaded = 0
 
         for session_file in session_files:
 
             try:
-
-                name = session_file.stem
-
-                if not name.startswith(
-                    "user_"
-                ):
-                    continue
-
-                user_id = int(
-                    name.replace(
-                        "user_",
-                        "",
-                        1,
-                    )
+                telegram_id = int(
+                    session_file.stem
                 )
+            except ValueError:
+                logger.warning(
+                    "Skipping invalid session filename: %s",
+                    session_file.name,
+                )
+                continue
 
+            try:
                 client = self._create_client(
-                    user_id
+                    telegram_id
                 )
 
                 await client.connect()
 
-                if await client.is_user_authorized():
+                if not await client.is_user_authorized():
+                    await client.disconnect()
 
-                    self.clients[
-                        user_id
-                    ] = client
-
-                    loaded_users.append(
-                        user_id
+                    logger.warning(
+                        "Session is not authorized: telegram_id=%s",
+                        telegram_id,
                     )
 
-                else:
+                    continue
 
-                    await client.disconnect()
+                self.clients[
+                    telegram_id
+                ] = client
+
+                try:
+                    os.chmod(
+                        session_file,
+                        0o600,
+                    )
+                except OSError:
+                    pass
+
+                loaded += 1
+
+                logger.info(
+                    "Telegram session loaded: telegram_id=%s",
+                    telegram_id,
+                )
 
             except Exception:
                 logger.exception(
-                    "Session yuklashda xatolik: %s",
-                    session_file,
+                    "Failed to load Telegram session: %s",
+                    session_file.name,
                 )
 
         logger.info(
-            "Mavjud Telegram sessionlar yuklandi: %s",
-            len(loaded_users),
+            "Existing Telegram sessions loaded: %s",
+            loaded,
         )
 
-        return loaded_users
-
-    # =====================================================
+    # =========================================================
     # SHUTDOWN
-    # =====================================================
+    # =========================================================
 
     async def shutdown(self) -> None:
+        """
+        Barcha Telethon clientlarni xavfsiz yopadi.
+        """
 
-        clients = list(
-            self.clients.values()
-        )
-
-        pending = list(
-            self.pending_clients.values()
+        all_clients = list(
+            self.clients.items()
         )
 
         self.clients.clear()
+
         self.pending_clients.clear()
         self.pending_phones.clear()
 
-        for client in (
-            clients + pending
-        ):
+        for telegram_id, client in all_clients:
 
             try:
                 if client.is_connected():
                     await client.disconnect()
-            except Exception:
-                logger.exception(
-                    "Telegram client shutdown xatosi."
+
+                logger.info(
+                    "Telegram client disconnected: telegram_id=%s",
+                    telegram_id,
                 )
 
+            except Exception:
+                logger.exception(
+                    "Failed to disconnect Telegram client: telegram_id=%s",
+                    telegram_id,
+                )
+
+        self.locks.clear()
+
         logger.info(
-            "Telegram Client Manager to'xtatildi."
+            "TelegramClientManager shutdown complete."
         )
 
 
-telegram_client_manager = (
-    TelegramClientManager()
-)
+# =============================================================
+# SINGLETON
+# =============================================================
+
+telegram_client_manager = TelegramClientManager()
+
+
+__all__ = [
+    "TelegramClientManager",
+    "telegram_client_manager",
+]

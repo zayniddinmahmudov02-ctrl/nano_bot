@@ -1,248 +1,224 @@
-from __future__ import annotations
-
 import logging
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import CommandStart
-from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 from sqlalchemy import select
 
 from app.config import BOT_USERNAME
-from app.database.db import AsyncSessionLocal
+from app.database import AsyncSessionLocal
 from app.database.models import (
     AdminStatistics,
     Referral,
     Statistics,
     Subscription,
-    User,
     UserSettings,
 )
 from app.keyboards.main import main_menu_keyboard
-from app.handlers.referrals import generate_referral_code, apply_referral
-
-
-router = Router(name="start")
+from app.services.user_service import get_or_create_user
 
 logger = logging.getLogger(__name__)
 
-
-async def get_or_create_user(message: Message) -> tuple[User, bool]:
-    """
-    Foydalanuvchini topadi yoki yaratadi.
-
-    Returns:
-        (user, is_new_user)
-    """
-
-    if not message.from_user:
-        raise ValueError("Telegram foydalanuvchisi aniqlanmadi.")
-
-    telegram_id = message.from_user.id
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(User).where(User.telegram_id == telegram_id)
-        )
-        user = result.scalar_one_or_none()
-
-        is_new_user = user is None
-
-        if user is None:
-            user = User(
-                telegram_id=telegram_id,
-                username=message.from_user.username,
-                first_name=message.from_user.first_name,
-                last_name=message.from_user.last_name,
-                language="uz",
-                active=True,
-            )
-
-            session.add(user)
-            await session.flush()
-
-        else:
-            # Telegramdagi ism va username o'zgargan bo'lishi mumkin.
-            user.username = message.from_user.username
-            user.first_name = message.from_user.first_name
-            user.last_name = message.from_user.last_name
-            user.active = True
-
-        # ---------------------------------------------------------
-        # USER SETTINGS
-        # ---------------------------------------------------------
-
-        result = await session.execute(
-            select(UserSettings).where(UserSettings.user_id == user.id)
-        )
-        settings = result.scalar_one_or_none()
-
-        if settings is None:
-            settings = UserSettings(
-                user_id=user.id,
-                language=user.language or "uz",
-            )
-            session.add(settings)
-
-        # ---------------------------------------------------------
-        # STATISTICS
-        # ---------------------------------------------------------
-
-        result = await session.execute(
-            select(Statistics).where(Statistics.user_id == user.id)
-        )
-        statistics = result.scalar_one_or_none()
-
-        if statistics is None:
-            statistics = Statistics(
-                user_id=user.id,
-                people_replied=0,
-                auto_replies_sent=0,
-                first_messages_sent=0,
-            )
-            session.add(statistics)
-
-        # ---------------------------------------------------------
-        # SUBSCRIPTION
-        # ---------------------------------------------------------
-
-        result = await session.execute(
-            select(Subscription).where(Subscription.user_id == user.id)
-        )
-        subscription = result.scalar_one_or_none()
-
-        if subscription is None:
-            subscription = Subscription(
-                user_id=user.id,
-                status="free",
-            )
-            session.add(subscription)
-
-        # ---------------------------------------------------------
-        # REFERRAL
-        # ---------------------------------------------------------
-
-        result = await session.execute(
-            select(Referral).where(Referral.user_id == user.id)
-        )
-        referral = result.scalar_one_or_none()
-
-        if referral is None:
-            referral = Referral(
-                user_id=user.id,
-                referral_code=generate_referral_code(user.id),
-                referral_count=0,
-            )
-            session.add(referral)
-
-        # ---------------------------------------------------------
-        # ADMIN STATISTICS
-        # ---------------------------------------------------------
-
-        admin_stats = await session.execute(
-            select(AdminStatistics).limit(1)
-        )
-        admin_statistics = admin_stats.scalar_one_or_none()
-
-        if admin_statistics is None:
-            admin_statistics = AdminStatistics(
-                total_users=0,
-                total_auto_replies=0,
-                total_replied_people=0,
-                total_payments=0,
-                total_revenue=0,
-            )
-            session.add(admin_statistics)
-
-        if is_new_user:
-            admin_statistics.total_users += 1
-
-        await session.commit()
-        await session.refresh(user)
-
-        return user, is_new_user
+router = Router()
 
 
-@router.message(CommandStart())
-async def start_handler(
-    message: Message,
-    command: CommandObject,
+async def initialize_user_data(
+    session,
+    user,
 ):
     """
-    /start komandasi.
+    Foydalanuvchi uchun barcha boshlang‘ich
+    ma'lumotlarni yaratadi.
 
-    Qo'llab-quvvatlanadi:
-
-        /start
-
-    va referral:
-
-        /start ref_123456
+    user.id — ichki PostgreSQL ID.
+    user.telegram_id — Telegram ID.
     """
 
-    try:
-        user, is_new_user = await get_or_create_user(message)
+    # -----------------------------
+    # USER SETTINGS
+    # -----------------------------
 
-    except Exception:
-        logger.exception("Foydalanuvchini yaratishda xatolik")
-
-        await message.answer(
-            "❌ Tizimda vaqtinchalik xatolik yuz berdi.\n"
-            "Iltimos, birozdan keyin qayta urinib ko‘ring."
+    result = await session.execute(
+        select(UserSettings).where(
+            UserSettings.user_id == user.id
         )
+    )
+
+    settings = result.scalar_one_or_none()
+
+    if settings is None:
+        settings = UserSettings(
+            user_id=user.id,
+            language=user.language or "uz",
+            notifications_enabled=True,
+        )
+
+        session.add(settings)
+
+
+    # -----------------------------
+    # STATISTICS
+    # -----------------------------
+
+    result = await session.execute(
+        select(Statistics).where(
+            Statistics.user_id == user.id
+        )
+    )
+
+    statistics = result.scalar_one_or_none()
+
+    if statistics is None:
+        statistics = Statistics(
+            user_id=user.id,
+            replied_people=0,
+            auto_replies=0,
+            first_messages_sent=0,
+        )
+
+        session.add(statistics)
+
+
+    # -----------------------------
+    # SUBSCRIPTION
+    # -----------------------------
+
+    result = await session.execute(
+        select(Subscription).where(
+            Subscription.user_id == user.id
+        )
+    )
+
+    subscription = result.scalar_one_or_none()
+
+    if subscription is None:
+        subscription = Subscription(
+            user_id=user.id,
+            status="free",
+            is_premium=False,
+        )
+
+        session.add(subscription)
+
+
+    # -----------------------------
+    # REFERRAL
+    # -----------------------------
+
+    result = await session.execute(
+        select(Referral).where(
+            Referral.user_id == user.id
+        )
+    )
+
+    referral = result.scalar_one_or_none()
+
+    if referral is None:
+        referral = Referral(
+            user_id=user.id,
+            referral_code=f"nano_{user.telegram_id}",
+            referral_count=0,
+        )
+
+        session.add(referral)
+
+
+    # -----------------------------
+    # ADMIN STATISTICS
+    # -----------------------------
+
+    result = await session.execute(
+        select(AdminStatistics)
+        .order_by(AdminStatistics.id.asc())
+        .limit(1)
+    )
+
+    admin_statistics = result.scalar_one_or_none()
+
+    if admin_statistics is None:
+        admin_statistics = AdminStatistics(
+            total_users=0,
+            total_auto_replies=0,
+            total_replied_people=0,
+            total_payments=0,
+            total_revenue=0,
+        )
+
+        session.add(admin_statistics)
+
+    return (
+        settings,
+        statistics,
+        subscription,
+        referral,
+        admin_statistics,
+    )
+
+
+async def process_start(
+    message: Message,
+) -> None:
+    telegram_user = message.from_user
+
+    if telegram_user is None:
         return
 
-    # ---------------------------------------------------------
-    # REFERRAL
-    # ---------------------------------------------------------
+    telegram_id = int(telegram_user.id)
 
-    if is_new_user and command.args:
-        referral_code = command.args.strip()
+    async with AsyncSessionLocal() as session:
 
-        try:
-            applied = await apply_referral(
-                new_user_id=user.id,
-                referral_code=referral_code,
+        # Telegram ID → User
+        user = await get_or_create_user(
+            session,
+            telegram_user,
+        )
+
+        is_new_user = False
+
+        # Foydalanuvchi bilan bog‘liq ma'lumotlarni tekshirish
+        result = await session.execute(
+            select(UserSettings).where(
+                UserSettings.user_id == user.id
             )
+        )
 
-            if applied:
-                logger.info(
-                    "Referral qo'llandi: user=%s code=%s",
-                    user.id,
-                    referral_code,
-                )
+        if result.scalar_one_or_none() is None:
+            is_new_user = True
 
-        except Exception:
-            logger.exception(
-                "Referral qo'llashda xatolik: user=%s code=%s",
-                user.id,
-                referral_code,
-            )
+        await initialize_user_data(
+            session,
+            user,
+        )
 
-    # ---------------------------------------------------------
-    # WELCOME MESSAGE
-    # ---------------------------------------------------------
+        await session.commit()
 
-    first_name = (
-        message.from_user.first_name
-        if message.from_user and message.from_user.first_name
-        else "Do‘st"
+    logger.info(
+        "User started bot: telegram_id=%s, db_user_id=%s, new=%s",
+        telegram_id,
+        user.id,
+        is_new_user,
     )
 
     if is_new_user:
         text = (
-            f"👋 <b>Assalomu alaykum, {first_name}!</b>\n\n"
-            "🤖 <b>Nano-Bot</b>ga xush kelibsiz!\n\n"
-            "Nano-Bot orqali Telegram akkauntingizni ulab, "
-            "avtomatik javoblar va birinchi xabar funksiyalaridan "
-            "foydalanishingiz mumkin.\n\n"
-            "🚀 Boshlash uchun quyidagi menyudan kerakli bo‘limni tanlang."
+            "👋 <b>Nano-Bot'ga xush kelibsiz!</b>\n\n"
+            "🤖 Telegram akkauntingizni "
+            "avtomatlashtirish uchun yordamchingiz.\n\n"
+            "Quyidagi imkoniyatlardan foydalanishingiz mumkin:\n\n"
+            "📱 Telegram ulash\n"
+            "🤖 Avto javoblar\n"
+            "1️⃣ Birinchi xabar\n"
+            "👥 Referallar\n"
+            "📊 Statistika\n"
+            "🌐 Til\n"
+            "💎 Premium\n"
+            "⚙️ Sozlamalar\n\n"
+            "Boshlash uchun kerakli bo‘limni tanlang 👇"
         )
     else:
         text = (
-            f"👋 <b>Xush kelibsiz, {first_name}!</b>\n\n"
-            "Nano-Bot xizmatlaridan foydalanishni davom ettiring.\n\n"
-            "👇 Kerakli bo‘limni tanlang:"
+            "👋 <b>Qaytganingizdan xursandmiz!</b>\n\n"
+            "Nano-Bot tayyor. Kerakli bo‘limni tanlang 👇"
         )
 
     await message.answer(
@@ -251,17 +227,57 @@ async def start_handler(
     )
 
 
-@router.message(lambda message: message.text == "🏠 Bosh menyu")
-async def back_to_main_menu(message: Message):
+@router.message(CommandStart())
+async def start_command(
+    message: Message,
+) -> None:
     """
-    Bosh menyuga qaytish.
+    /start
+    /start referral_code
     """
 
+    args = None
+
+    if message.text:
+        parts = message.text.split(maxsplit=1)
+
+        if len(parts) > 1:
+            args = parts[1].strip()
+
+    await process_start(message)
+
+    # Referral deep-link alohida qayta ishlanadi.
+    # Referral handler o‘zining apply_referral()
+    # funksiyasi orqali tekshiradi.
+    if args:
+        try:
+            from app.handlers.referrals import apply_referral
+
+            await apply_referral(
+                telegram_id=int(message.from_user.id),
+                referral_code=args,
+            )
+
+        except Exception:
+            logger.exception(
+                "Failed to process referral: telegram_id=%s",
+                message.from_user.id,
+            )
+
+
+@router.message(F.text == "🏠 Bosh menyu")
+async def start_home(
+    message: Message,
+) -> None:
     await message.answer(
         "🏠 <b>Bosh menyu</b>\n\n"
-        "👇 Kerakli bo‘limni tanlang:",
+        "Kerakli bo‘limni tanlang 👇",
         reply_markup=main_menu_keyboard(),
     )
 
 
-__all__ = ["router"]
+__all__ = [
+    "router",
+    "process_start",
+    "initialize_user_data",
+]

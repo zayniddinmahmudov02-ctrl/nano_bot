@@ -3,451 +3,375 @@ import secrets
 import string
 
 from aiogram import F, Router
-from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.config import BOT_USERNAME
 from app.database import AsyncSessionLocal
-from app.database.models import Referral, User
+from app.database.models import Referral
 from app.keyboards.main import main_menu_keyboard
-from app.keyboards.referral import referral_keyboard
+from app.keyboards.referral import (
+    referral_back_keyboard,
+    referral_keyboard,
+    referral_level_keyboard,
+    referral_link_keyboard,
+)
+from app.services.user_service import get_user_by_telegram_id
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
 
-# =========================================================
-# REFERRAL LIMITS
-# =========================================================
-
-def get_auto_reply_limit(
-    referral_count: int,
-) -> int | None:
-    """
-    Referral soniga qarab AutoReply limitini qaytaradi.
-
-    0-9   -> 3
-    10-29 -> 10
-    30-49 -> 20
-    50+   -> None = cheksiz
-    """
-
+def get_referral_level(referral_count: int) -> int:
     if referral_count >= 50:
-        return None
+        return 4
 
     if referral_count >= 30:
-        return 20
-
-    if referral_count >= 10:
-        return 10
-
-    return 3
-
-
-def get_language_limit(
-    referral_count: int,
-) -> int:
-    """
-    Referral soniga qarab ruxsat etilgan tillar soni.
-
-    0-29  -> 1 til
-    30-49 -> 2 til
-    50+   -> 3 til
-    """
-
-    if referral_count >= 50:
         return 3
 
-    if referral_count >= 30:
+    if referral_count >= 10:
         return 2
 
     return 1
 
 
-def get_referral_level(
-    referral_count: int,
-) -> str:
-
+def get_referral_limit(referral_count: int) -> str:
     if referral_count >= 50:
-        return "💎 Premium daraja"
+        return "♾ Cheksiz"
 
     if referral_count >= 30:
-        return "🥇 30+ referral"
+        return "20 ta"
 
     if referral_count >= 10:
-        return "🥈 10+ referral"
+        return "10 ta"
 
-    return "🥉 Boshlang‘ich"
+    return "3 ta"
 
 
-# =========================================================
-# REFERRAL CODE
-# =========================================================
-
-def generate_referral_code(
-    length: int = 10,
-) -> str:
-
-    alphabet = (
-        string.ascii_letters
-        + string.digits
-    )
+def generate_referral_code(length: int = 10) -> str:
+    characters = string.ascii_letters + string.digits
 
     return "".join(
-        secrets.choice(alphabet)
+        secrets.choice(characters)
         for _ in range(length)
     )
 
 
 async def get_or_create_referral(
+    session,
     user_id: int,
 ) -> Referral:
+    result = await session.execute(
+        select(Referral).where(
+            Referral.user_id == user_id
+        )
+    )
 
-    async with AsyncSessionLocal() as session:
+    referral = result.scalar_one_or_none()
+
+    if referral is not None:
+        return referral
+
+    while True:
+        code = generate_referral_code()
 
         result = await session.execute(
             select(Referral).where(
-                Referral.user_id == user_id
+                Referral.referral_code == code
             )
         )
 
-        referral = (
-            result.scalar_one_or_none()
-        )
+        exists = result.scalar_one_or_none()
 
-        if referral:
-            return referral
+        if exists is None:
+            break
 
-        while True:
+    referral = Referral(
+        user_id=user_id,
+        referred_by=None,
+        referral_code=code,
+        referral_count=0,
+    )
 
-            code = generate_referral_code()
+    session.add(referral)
 
-            exists = await session.execute(
-                select(Referral).where(
-                    Referral.referral_code == code
-                )
-            )
+    await session.flush()
 
-            if not exists.scalar_one_or_none():
-                break
+    return referral
 
-        referral = Referral(
-            user_id=user_id,
-            referral_code=code,
-            referral_count=0,
-            referred_by=None,
-        )
-
-        session.add(referral)
-
-        await session.commit()
-
-        await session.refresh(
-            referral
-        )
-
-        return referral
-
-
-# =========================================================
-# APPLY REFERRAL
-# =========================================================
 
 async def apply_referral(
+    session,
     new_user_id: int,
-    referral_code: str | None,
+    referral_code: str,
 ) -> bool:
     """
-    Yangi user referral orqali kelgan bo‘lsa,
-    referral countni oshiradi.
+    Yangi user uchun referralni bir marta qo‘llaydi.
 
-    True = referral muvaffaqiyatli qo‘llandi.
-    False = qo‘llanmadi.
+    new_user_id — users.id.
+    referral_code — referal havoladagi kod.
     """
 
-    if not referral_code:
-        return False
-
-    referral_code = (
-        referral_code.strip()
-    )
+    referral_code = referral_code.strip()
 
     if not referral_code:
         return False
 
-    async with AsyncSessionLocal() as session:
-
-        new_user_result = await session.execute(
-            select(User).where(
-                User.id == new_user_id
-            )
+    result = await session.execute(
+        select(Referral).where(
+            Referral.referral_code == referral_code
         )
-
-        new_user = (
-            new_user_result.scalar_one_or_none()
-        )
-
-        if not new_user:
-            return False
-
-        referral_result = await session.execute(
-            select(Referral).where(
-                Referral.referral_code
-                == referral_code
-            )
-        )
-
-        referrer_referral = (
-            referral_result.scalar_one_or_none()
-        )
-
-        if not referrer_referral:
-            return False
-
-        # O'zini o'zi referral qilishga yo'l yo'q.
-        if (
-            referrer_referral.user_id
-            == new_user_id
-        ):
-            return False
-
-        # Yangi userning referral yozuvi
-        # allaqachon mavjud bo'lsa, qayta
-        # referral hisoblanmaydi.
-        existing_result = await session.execute(
-            select(Referral).where(
-                Referral.user_id
-                == new_user_id
-            )
-        )
-
-        new_referral = (
-            existing_result.scalar_one_or_none()
-        )
-
-        if new_referral:
-            if new_referral.referred_by:
-                return False
-
-            new_referral.referred_by = (
-                referrer_referral.user_id
-            )
-
-        else:
-            code = generate_referral_code()
-
-            while True:
-                exists = await session.execute(
-                    select(Referral).where(
-                        Referral.referral_code
-                        == code
-                    )
-                )
-
-                if not exists.scalar_one_or_none():
-                    break
-
-                code = generate_referral_code()
-
-            new_referral = Referral(
-                user_id=new_user_id,
-                referred_by=(
-                    referrer_referral.user_id
-                ),
-                referral_code=code,
-                referral_count=0,
-            )
-
-            session.add(new_referral)
-
-        referrer_referral.referral_count += 1
-
-        await session.commit()
-
-    logger.info(
-        "Referral applied: new_user=%s referrer=%s",
-        new_user_id,
-        referrer_referral.user_id,
     )
+
+    referrer = result.scalar_one_or_none()
+
+    if referrer is None:
+        return False
+
+    # O‘zini o‘zi referal qilishni taqiqlash
+    if referrer.user_id == new_user_id:
+        return False
+
+    # Yangi foydalanuvchining referral yozuvini topamiz
+    result = await session.execute(
+        select(Referral).where(
+            Referral.user_id == new_user_id
+        )
+    )
+
+    new_user_referral = result.scalar_one_or_none()
+
+    if new_user_referral is None:
+        new_user_referral = Referral(
+            user_id=new_user_id,
+            referred_by=referrer.user_id,
+            referral_code=generate_referral_code(),
+            referral_count=0,
+        )
+
+        session.add(new_user_referral)
+
+    elif new_user_referral.referred_by is not None:
+        # Referral oldin berilgan
+        return False
+
+    else:
+        new_user_referral.referred_by = (
+            referrer.user_id
+        )
+
+    # Refererning hisoblagichini oshiramiz
+    referrer.referral_count = (
+        referrer.referral_count + 1
+    )
+
+    await session.flush()
 
     return True
 
 
-# =========================================================
-# MAIN REFERRAL MENU
-# =========================================================
-
 @router.message(F.text == "👥 Referallar")
-async def referrals_menu(
+async def referral_menu(
     message: Message,
-    state: FSMContext,
 ) -> None:
-
-    await state.clear()
-
-    user_id = message.from_user.id
-
-    referral = await get_or_create_referral(
-        user_id
-    )
-
-    count = referral.referral_count
-
-    limit = get_auto_reply_limit(
-        count
-    )
-
-    language_limit = get_language_limit(
-        count
-    )
-
-    level = get_referral_level(
-        count
-    )
-
-    if limit is None:
-        limit_text = "♾️ Cheksiz"
-    else:
-        limit_text = str(limit)
-
     await message.answer(
         "👥 <b>Referallar</b>\n\n"
-        f"👤 Sizning referallaringiz: "
-        f"<b>{count}</b>\n"
-        f"🏆 Daraja: <b>{level}</b>\n\n"
-        f"🤖 Avto xabar limiti: "
-        f"<b>{limit_text}</b>\n"
-        f"🌐 Til limiti: "
-        f"<b>{language_limit} ta</b>\n\n"
-        "🎯 <b>Darajalar:</b>\n"
-        "0–9 → 3 ta avto xabar\n"
-        "10 → 10 ta avto xabar\n"
-        "30 → 20 ta + 2 til\n"
-        "50 → ♾️ + 3 til",
+        "Do‘stlaringizni Nano-Botga taklif qiling "
+        "va qo‘shimcha imkoniyatlarni oching.\n\n"
+        "🎁 <b>10 referal</b> → 10 ta avto javob\n"
+        "🎁 <b>30 referal</b> → 20 ta avto javob + 2 til\n"
+        "🎁 <b>50 referal</b> → cheksiz avto javob + 3 til",
         reply_markup=referral_keyboard(),
     )
 
 
-# =========================================================
-# REFERRAL LINK
-# =========================================================
-
-@router.message(
-    F.text == "🔗 Referal havolam"
-)
+@router.message(F.text == "🔗 Referal havolam")
 async def referral_link(
     message: Message,
 ) -> None:
+    telegram_id = int(message.from_user.id)
 
-    user_id = message.from_user.id
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
 
-    referral = await get_or_create_referral(
-        user_id
-    )
+        if user is None:
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.\n\n"
+                "Iltimos, /start buyrug‘ini bosing.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
 
-    username = BOT_USERNAME
+        referral = await get_or_create_referral(
+            session,
+            user.id,
+        )
 
-    if username:
-        username = username.lstrip("@")
-    else:
-        username = "nano_go_bot"
+        await session.commit()
+
+        code = referral.referral_code
+        count = referral.referral_count
+
+    bot_username = BOT_USERNAME.lstrip("@")
 
     link = (
-        f"https://t.me/{username}"
-        f"?start=ref_{referral.referral_code}"
+        f"https://t.me/{bot_username}"
+        f"?start=ref_{code}"
     )
 
     await message.answer(
-        "🔗 <b>Sizning referal havolangiz:</b>\n\n"
+        "🔗 <b>Sizning referal havolangiz</b>\n\n"
         f"<code>{link}</code>\n\n"
-        "Do‘stlaringiz shu havola orqali "
-        "Nano-Botga kirsa, referalingizga "
-        "qo‘shiladi."
+        f"👥 Referallar: <b>{count}</b>\n"
+        f"📈 Daraja: <b>{get_referral_level(count)}</b>\n"
+        f"📌 Avto javob limiti: "
+        f"<b>{get_referral_limit(count)}</b>\n\n"
+        "Havolani do‘stlaringizga yuboring.",
+        reply_markup=referral_link_keyboard(),
     )
 
 
-# =========================================================
-# REFERRAL LEVEL
-# =========================================================
+@router.message(F.text == "📊 Referal statistikasi")
+async def referral_statistics(
+    message: Message,
+) -> None:
+    telegram_id = int(message.from_user.id)
 
-@router.message(
-    F.text == "🏆 Referal darajam"
-)
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        referral = await get_or_create_referral(
+            session,
+            user.id,
+        )
+
+        await session.commit()
+
+        count = referral.referral_count
+
+    level = get_referral_level(count)
+
+    if count < 10:
+        next_level = 10
+    elif count < 30:
+        next_level = 30
+    elif count < 50:
+        next_level = 50
+    else:
+        next_level = None
+
+    if next_level is None:
+        progress = "🏆 Maksimal daraja!"
+    else:
+        remaining = next_level - count
+        progress = (
+            f"🎯 Keyingi darajagacha: "
+            f"<b>{remaining}</b> ta referal"
+        )
+
+    await message.answer(
+        "📊 <b>Referal statistikasi</b>\n\n"
+        f"👥 Jami referallar: <b>{count}</b>\n"
+        f"🏆 Daraja: <b>{level}</b>\n"
+        f"📌 Avto javob limiti: "
+        f"<b>{get_referral_limit(count)}</b>\n\n"
+        f"{progress}",
+        reply_markup=referral_link_keyboard(),
+    )
+
+
+@router.message(F.text == "🏆 Darajam")
 async def referral_level(
     message: Message,
 ) -> None:
+    telegram_id = int(message.from_user.id)
 
-    user_id = message.from_user.id
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
 
-    referral = await get_or_create_referral(
-        user_id
-    )
+        if user is None:
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
 
-    count = referral.referral_count
+        referral = await get_or_create_referral(
+            session,
+            user.id,
+        )
 
-    limit = get_auto_reply_limit(
-        count
-    )
+        await session.commit()
 
-    language_limit = get_language_limit(
-        count
-    )
+        count = referral.referral_count
 
-    if limit is None:
-        limit_text = "♾️ Cheksiz"
+    level = get_referral_level(count)
+
+    if level == 1:
+        title = "🥉 Boshlang‘ich"
+        requirement = "0–9 referal"
+        benefit = "3 ta avto javob"
+
+    elif level == 2:
+        title = "🥈 Faol"
+        requirement = "10–29 referal"
+        benefit = "10 ta avto javob"
+
+    elif level == 3:
+        title = "🥇 Kuchli"
+        requirement = "30–49 referal"
+        benefit = (
+            "20 ta avto javob + 2 ta til"
+        )
+
     else:
-        limit_text = str(limit)
-
-    if count < 10:
-        next_goal = (
-            f"Yana {10 - count} ta referral → "
-            "10 ta avto xabar"
-        )
-
-    elif count < 30:
-        next_goal = (
-            f"Yana {30 - count} ta referral → "
-            "20 ta avto xabar + 2 til"
-        )
-
-    elif count < 50:
-        next_goal = (
-            f"Yana {50 - count} ta referral → "
-            "♾️ avto xabar + 3 til"
-        )
-
-    else:
-        next_goal = (
-            "🎉 Siz maksimal referral darajasiga "
-            "yetdingiz!"
+        title = "💎 Premium daraja"
+        requirement = "50+ referal"
+        benefit = (
+            "♾ Cheksiz avto javob + 3 ta til"
         )
 
     await message.answer(
-        "🏆 <b>Referal darajangiz</b>\n\n"
-        f"👥 Referral: <b>{count}</b>\n"
-        f"🤖 Avto xabar: "
-        f"<b>{limit_text}</b>\n"
-        f"🌐 Til: <b>{language_limit} ta</b>\n\n"
-        f"🎯 {next_goal}",
-        reply_markup=referral_keyboard(),
+        "🏆 <b>Sizning darajangiz</b>\n\n"
+        f"{title}\n"
+        f"👥 Referallar: <b>{count}</b>\n"
+        f"📌 Talab: <b>{requirement}</b>\n"
+        f"🎁 Imtiyoz: <b>{benefit}</b>",
+        reply_markup=referral_level_keyboard(),
     )
 
 
-# =========================================================
-# BACK
-# =========================================================
-
-@router.message(F.text == "⬅️ Orqaga")
+@router.message(F.text == "🏠 Bosh menyu")
 async def referral_back(
     message: Message,
-    state: FSMContext,
 ) -> None:
-
-    await state.clear()
-
     await message.answer(
-        "🏠 <b>Asosiy menyu</b>",
+        "🏠 <b>Bosh menyu</b>",
         reply_markup=main_menu_keyboard(),
     )
+
+
+__all__ = [
+    "router",
+    "get_referral_level",
+    "get_referral_limit",
+    "get_or_create_referral",
+    "apply_referral",
+]
