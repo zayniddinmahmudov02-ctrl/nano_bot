@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from aiogram import F, Router
@@ -6,21 +8,29 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from sqlalchemy import select
 
+from telethon.errors import (
+    FloodWaitError,
+    PhoneCodeExpiredError,
+    PhoneCodeInvalidError,
+    SessionPasswordNeededError,
+)
+
 from app.database import AsyncSessionLocal
 from app.database.models import TelegramAccount
 from app.keyboards.main import main_menu_keyboard
-from app.keyboards.telegram import (
-    telegram_menu_keyboard,
-)
-from app.services.user_service import (
-    get_user_by_telegram_id,
-)
+from app.keyboards.telegram import telegram_menu_keyboard
+from app.services.user_service import get_user_by_telegram_id
 from app.telegram.user_client import telegram_client_manager
+
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
+
+# =========================================================
+# STATES
+# =========================================================
 
 class TelegramConnectStates(StatesGroup):
     waiting_phone = State()
@@ -28,12 +38,19 @@ class TelegramConnectStates(StatesGroup):
     waiting_password = State()
 
 
+# =========================================================
+# TELEGRAM CONNECT MENU
+# =========================================================
+
 @router.message(F.text == "📱 Telegram ulash")
 async def telegram_connect_menu(
     message: Message,
     state: FSMContext,
 ) -> None:
     await state.clear()
+
+    if message.from_user is None:
+        return
 
     telegram_id = int(message.from_user.id)
 
@@ -71,103 +88,145 @@ async def telegram_connect_menu(
     )
 
 
+# =========================================================
+# DISCONNECT
+# =========================================================
+
 @router.message(F.text == "🔌 Telegramni uzish")
 async def telegram_disconnect(
     message: Message,
     state: FSMContext,
 ) -> None:
+    if message.from_user is None:
+        return
+
     telegram_id = int(message.from_user.id)
 
-    await telegram_client_manager.logout(
-        telegram_id
-    )
+    try:
+        await telegram_client_manager.logout(
+            telegram_id
+        )
 
-    async with AsyncSessionLocal() as session:
-        user = await get_user_by_telegram_id(
-            session,
+        async with AsyncSessionLocal() as session:
+            user = await get_user_by_telegram_id(
+                session,
+                telegram_id,
+            )
+
+            if user:
+                result = await session.execute(
+                    select(TelegramAccount).where(
+                        TelegramAccount.user_id == user.id
+                    )
+                )
+
+                account = result.scalar_one_or_none()
+
+                if account:
+                    account.is_connected = False
+                    account.status = "disconnected"
+
+                    await session.commit()
+
+        await state.clear()
+
+        await message.answer(
+            "🔌 <b>Telegram uzildi.</b>\n\n"
+            "Telegram akkauntingiz Nano-Botdan "
+            "uzildi.",
+            reply_markup=main_menu_keyboard(),
+        )
+
+    except Exception:
+        logger.exception(
+            "Telegram disconnect xatosi: telegram_id=%s",
             telegram_id,
         )
 
-        if user:
-            result = await session.execute(
-                select(TelegramAccount).where(
-                    TelegramAccount.user_id == user.id
-                )
-            )
+        await message.answer(
+            "❌ Telegram akkauntini uzishda "
+            "xatolik yuz berdi."
+        )
 
-            account = result.scalar_one_or_none()
 
-            if account:
-                account.is_connected = False
-                account.status = "disconnected"
-
-                await session.commit()
-
-    await state.clear()
-
-    await message.answer(
-        "🔌 <b>Telegram uzildi.</b>\n\n"
-        "Telegram akkauntingiz Nano-Botdan "
-        "uzildi.",
-        reply_markup=main_menu_keyboard(),
-    )
-
+# =========================================================
+# STATUS
+# =========================================================
 
 @router.message(F.text == "🔄 Holatni tekshirish")
 async def telegram_status(
     message: Message,
 ) -> None:
+    if message.from_user is None:
+        return
+
     telegram_id = int(message.from_user.id)
 
-    connected = await get_connection_status(
-        telegram_id
-    )
+    try:
+        connected = await get_connection_status(
+            telegram_id
+        )
 
-    if not connected:
+        if not connected:
+            await message.answer(
+                "❌ Telegram akkaunt ulanmagan.",
+                reply_markup=telegram_menu_keyboard(
+                    connected=False
+                ),
+            )
+            return
+
+        me = await telegram_client_manager.get_me(
+            telegram_id
+        )
+
+        if me:
+            username = (
+                f"@{me.username}"
+                if me.username
+                else "Username yo‘q"
+            )
+
+            name = (
+                me.first_name
+                or "Telegram"
+            )
+
+            await message.answer(
+                "📱 <b>Telegram holati</b>\n\n"
+                "🟢 Holat: <b>Ulangan</b>\n"
+                f"👤 Ism: <b>{name}</b>\n"
+                f"🔗 Username: <b>{username}</b>\n"
+                f"🆔 ID: <code>{me.id}</code>",
+                reply_markup=telegram_menu_keyboard(
+                    connected=True
+                ),
+            )
+            return
+
         await message.answer(
-            "❌ Telegram akkaunt ulanmagan.",
+            "⚠️ Session mavjud, lekin Telegram "
+            "akkauntiga ulanishni tekshirib bo‘lmadi.",
             reply_markup=telegram_menu_keyboard(
                 connected=False
             ),
         )
-        return
 
-    me = await telegram_client_manager.get_me(
-        telegram_id
-    )
-
-    if me:
-        username = (
-            f"@{me.username}"
-            if me.username
-            else "Username yo‘q"
-        )
-
-        name = (
-            me.first_name
-            or "Telegram"
+    except Exception:
+        logger.exception(
+            "Telegram status xatosi: telegram_id=%s",
+            telegram_id,
         )
 
         await message.answer(
-            "📱 <b>Telegram holati</b>\n\n"
-            "🟢 Holat: <b>Ulangan</b>\n"
-            f"👤 Ism: <b>{name}</b>\n"
-            f"🔗 Username: <b>{username}</b>\n"
-            f"🆔 ID: <code>{me.id}</code>",
-            reply_markup=telegram_menu_keyboard(
-                connected=True
-            ),
+            "❌ Telegram holatini tekshirishda "
+            "xatolik yuz berdi."
         )
-        return
 
-    await message.answer(
-        "⚠️ Session mavjud, lekin Telegram "
-        "akkauntiga ulanishni tekshirib bo‘lmadi.",
-        reply_markup=telegram_menu_keyboard(
-            connected=False
-        ),
-    )
 
+# =========================================================
+# CANCEL PHONE
+# =========================================================
 
 @router.message(
     TelegramConnectStates.waiting_phone,
@@ -185,6 +244,10 @@ async def cancel_phone(
     )
 
 
+# =========================================================
+# RECEIVE PHONE
+# =========================================================
+
 @router.message(
     TelegramConnectStates.waiting_phone,
     F.text,
@@ -193,7 +256,14 @@ async def receive_phone(
     message: Message,
     state: FSMContext,
 ) -> None:
+    if message.from_user is None:
+        return
+
     phone = message.text.strip()
+
+    # -----------------------------------------------------
+    # VALIDATE PHONE
+    # -----------------------------------------------------
 
     if not phone.startswith("+"):
         await message.answer(
@@ -223,34 +293,37 @@ async def receive_phone(
         "⏳ <b>Telegram kodi yuborilmoqda...</b>"
     )
 
-    result = (
-        await telegram_client_manager
-        .start_phone_login(
-            user_id=telegram_id,
-            phone=phone,
-        )
-    )
+    # -----------------------------------------------------
+    # START TELEGRAM LOGIN
+    # -----------------------------------------------------
 
-    status = result.get("status")
-
-    if status == "already_authorized":
-        await save_connected_account(
-            telegram_id=telegram_id,
-            result=result,
+    try:
+        result = (
+            await telegram_client_manager
+            .start_phone_login(
+                telegram_id=telegram_id,
+                phone=phone,
+            )
         )
 
-        await state.clear()
+        if not result:
+            logger.error(
+                "Telegram login boshlanmadi: telegram_id=%s",
+                telegram_id,
+            )
 
-        await message.answer(
-            "✅ Telegram akkaunt allaqachon "
-            "ulangan.",
-            reply_markup=main_menu_keyboard(),
-        )
-        return
+            await message.answer(
+                "❌ Telegram login jarayonini "
+                "boshlab bo‘lmadi."
+            )
+            return
 
-    if status == "code_sent":
+        # -------------------------------------------------
+        # SAVE FSM DATA
+        # -------------------------------------------------
+
         await state.update_data(
-            phone=phone
+            phone=phone,
         )
 
         await state.set_state(
@@ -265,33 +338,33 @@ async def receive_phone(
             "<code>12345</code>\n\n"
             "⚠️ Kodni hech kimga yubormang."
         )
-        return
 
-    if status == "flood_wait":
-        seconds = result.get(
-            "seconds",
-            0,
-        )
+    except FloodWaitError as error:
+        seconds = int(error.seconds)
 
         await message.answer(
             "⏳ Juda ko‘p urinish.\n\n"
             f"{seconds} soniyadan keyin "
             "qayta urinib ko‘ring."
         )
-        return
 
-    logger.error(
-        "Telegram login error: %s",
-        result,
-    )
+    except Exception:
+        logger.exception(
+            "Telegram phone login xatosi: telegram_id=%s",
+            telegram_id,
+        )
 
-    await message.answer(
-        "❌ Telegram kodini yuborishda "
-        "xatolik yuz berdi.\n\n"
-        "Telefon raqamingizni tekshiring "
-        "va qayta urinib ko‘ring."
-    )
+        await message.answer(
+            "❌ Telegram kodini yuborishda "
+            "xatolik yuz berdi.\n\n"
+            "Telefon raqamingizni tekshiring "
+            "va qayta urinib ko‘ring."
+        )
 
+
+# =========================================================
+# CANCEL CODE
+# =========================================================
 
 @router.message(
     TelegramConnectStates.waiting_code,
@@ -301,6 +374,18 @@ async def cancel_code(
     message: Message,
     state: FSMContext,
 ) -> None:
+    if message.from_user is not None:
+        telegram_id = int(message.from_user.id)
+
+        try:
+            await telegram_client_manager.logout(
+                telegram_id
+            )
+        except Exception:
+            logger.exception(
+                "Pending Telegram login cleanup failed"
+            )
+
     await state.clear()
 
     await message.answer(
@@ -308,6 +393,10 @@ async def cancel_code(
         reply_markup=main_menu_keyboard(),
     )
 
+
+# =========================================================
+# RECEIVE CODE
+# =========================================================
 
 @router.message(
     TelegramConnectStates.waiting_code,
@@ -317,25 +406,25 @@ async def receive_code(
     message: Message,
     state: FSMContext,
 ) -> None:
+    if message.from_user is None:
+        return
+
     code = message.text.strip()
+
+    # -----------------------------------------------------
+    # VALIDATE CODE
+    # -----------------------------------------------------
 
     if not code.isdigit():
         await message.answer(
-            "❌ Kod faqat raqamlardan iborat "
-            "bo‘lishi kerak."
+            "❌ Kod faqat raqamlardan iborat bo‘lishi kerak."
         )
         return
 
-    data = await state.get_data()
-    phone = data.get("phone")
-
-    if not phone:
-        await state.clear()
-
+    if len(code) < 4 or len(code) > 8:
         await message.answer(
-            "❌ Login sessiyasi topilmadi.\n\n"
-            "Ulanishni qaytadan boshlang.",
-            reply_markup=main_menu_keyboard(),
+            "❌ Login kodi noto‘g‘ri.\n\n"
+            "Telegram yuborgan kodni to‘liq kiriting."
         )
         return
 
@@ -345,88 +434,81 @@ async def receive_code(
         "⏳ <b>Kod tekshirilmoqda...</b>"
     )
 
-    result = (
-        await telegram_client_manager
-        .sign_in_code(
-            user_id=telegram_id,
-            phone=phone,
-            code=code,
-        )
-    )
+    # -----------------------------------------------------
+    # SIGN IN
+    # -----------------------------------------------------
 
-    status = result.get("status")
-
-    if status == "authorized":
-        await save_connected_account(
-            telegram_id=telegram_id,
-            result=result,
+    try:
+        success = (
+            await telegram_client_manager
+            .sign_in_code(
+                telegram_id=telegram_id,
+                code=code,
+            )
         )
 
-        await state.clear()
+        if success:
+            await save_connected_account(
+                telegram_id=telegram_id,
+            )
 
-        await message.answer(
-            "✅ <b>Telegram muvaffaqiyatli ulandi!</b>\n\n"
-            "Endi Nano-Bot sizning shaxsiy "
-            "Telegram akkauntingizdagi avtomatik "
-            "javoblarni boshqarishi mumkin.",
-            reply_markup=main_menu_keyboard(),
-        )
-        return
+            await state.clear()
 
-    if status == "password_required":
+            await message.answer(
+                "✅ <b>Telegram akkaunt muvaffaqiyatli ulandi!</b>\n\n"
+                "Endi Nano-Bot ulangan Telegram "
+                "akkauntingiz bilan ishlashi mumkin.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+    except SessionPasswordNeededError:
         await state.set_state(
             TelegramConnectStates.waiting_password
         )
 
         await message.answer(
-            "🔐 <b>2FA password kerak.</b>\n\n"
-            "Telegram akkauntingizdagi "
-            "2 bosqichli himoya parolini yuboring.\n\n"
-            "⚠️ Password database'ga saqlanmaydi."
+            "🔐 <b>2FA parol kerak.</b>\n\n"
+            "Telegram akkauntingizda "
+            "ikki bosqichli himoya yoqilgan.\n\n"
+            "Iltimos, 2FA parolingizni yuboring."
         )
         return
 
-    if status == "invalid_code":
+    except PhoneCodeInvalidError:
         await message.answer(
-            "❌ Kod noto‘g‘ri.\n\n"
-            "Telegram yuborgan kodni "
-            "qaytadan kiriting."
+            "❌ <b>Kod noto‘g‘ri.</b>\n\n"
+            "Telegram yuborgan kodni qayta tekshiring "
+            "va yana yuboring."
         )
         return
 
-    if status == "expired_code":
+    except PhoneCodeExpiredError:
         await state.clear()
 
         await message.answer(
-            "⌛ Kodning amal qilish muddati tugadi.\n\n"
-            "Telegram ulashni qaytadan boshlang.",
+            "⌛ <b>Kodning amal qilish muddati tugagan.</b>\n\n"
+            "Iltimos, Telegram ulash jarayonini "
+            "qaytadan boshlang.",
             reply_markup=main_menu_keyboard(),
         )
         return
 
-    if status == "flood_wait":
-        seconds = result.get(
-            "seconds",
-            0,
+    except Exception:
+        logger.exception(
+            "Telegram code login xatosi: telegram_id=%s",
+            telegram_id,
         )
 
         await message.answer(
-            "⏳ Juda ko‘p urinish.\n\n"
-            f"{seconds} soniyadan keyin "
-            "qayta urinib ko‘ring."
+            "❌ Telegram kodini tekshirishda "
+            "xatolik yuz berdi."
         )
-        return
 
-    logger.error(
-        "Telegram code error: %s",
-        result,
-    )
 
-    await message.answer(
-        "❌ Telegram akkauntni ulashda "
-        "xatolik yuz berdi."
-    )
-
+# =========================================================
+# CANCEL PASSWORD
+# =========================================================
 
 @router.message(
     TelegramConnectStates.waiting_password,
@@ -436,6 +518,18 @@ async def cancel_password(
     message: Message,
     state: FSMContext,
 ) -> None:
+    if message.from_user is not None:
+        telegram_id = int(message.from_user.id)
+
+        try:
+            await telegram_client_manager.logout(
+                telegram_id
+            )
+        except Exception:
+            logger.exception(
+                "2FA login cleanup failed"
+            )
+
     await state.clear()
 
     await message.answer(
@@ -443,6 +537,10 @@ async def cancel_password(
         reply_markup=main_menu_keyboard(),
     )
 
+
+# =========================================================
+# RECEIVE 2FA PASSWORD
+# =========================================================
 
 @router.message(
     TelegramConnectStates.waiting_password,
@@ -452,212 +550,265 @@ async def receive_password(
     message: Message,
     state: FSMContext,
 ) -> None:
+    if message.from_user is None:
+        return
+
     password = message.text.strip()
 
     if not password:
         await message.answer(
-            "❌ Password bo‘sh bo‘lishi mumkin emas."
+            "❌ Parol bo‘sh bo‘lishi mumkin emas."
         )
         return
 
     telegram_id = int(message.from_user.id)
 
     await message.answer(
-        "⏳ <b>2FA tekshirilmoqda...</b>"
+        "⏳ <b>2FA parol tekshirilmoqda...</b>"
     )
 
-    result = (
-        await telegram_client_manager
-        .sign_in_password(
-            user_id=telegram_id,
-            password=password,
-        )
-    )
-
-    status = result.get("status")
-
-    if status == "authorized":
-        await save_connected_account(
-            telegram_id=telegram_id,
-            result=result,
+    try:
+        success = (
+            await telegram_client_manager
+            .sign_in_password(
+                telegram_id=telegram_id,
+                password=password,
+            )
         )
 
-        await state.clear()
+        if success:
+            await save_connected_account(
+                telegram_id=telegram_id,
+            )
+
+            await state.clear()
+
+            await message.answer(
+                "✅ <b>Telegram akkaunt muvaffaqiyatli ulandi!</b>\n\n"
+                "2FA tekshiruvi muvaffaqiyatli yakunlandi.\n\n"
+                "Nano-Bot endi ulangan Telegram "
+                "akkauntingiz bilan ishlashi mumkin.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
 
         await message.answer(
-            "✅ <b>Telegram muvaffaqiyatli ulandi!</b>\n\n"
-            "2FA tekshirildi va session yaratildi.",
-            reply_markup=main_menu_keyboard(),
+            "❌ Telegram akkauntini ulashning "
+            "iloji bo‘lmadi."
         )
-        return
 
-    if status == "invalid_password":
+    except Exception:
+        logger.exception(
+            "Telegram 2FA login xatosi: telegram_id=%s",
+            telegram_id,
+        )
+
         await message.answer(
-            "❌ 2FA password noto‘g‘ri.\n\n"
-            "Qaytadan kiriting."
+            "❌ 2FA parolini tekshirishda "
+            "xatolik yuz berdi.\n\n"
+            "Parolni qayta tekshirib yuboring."
         )
-        return
 
-    logger.error(
-        "Telegram password error: %s",
-        result,
-    )
 
-    await message.answer(
-        "❌ 2FA tekshirishda xatolik yuz berdi."
-    )
+# =========================================================
+# SAVE CONNECTED ACCOUNT
+# =========================================================
 
+async def save_connected_account(
+    telegram_id: int,
+) -> bool:
+    """
+    Ulangan Telegram akkauntini PostgreSQL bazaga saqlaydi.
+
+    Muhim:
+    telegram_id -> users.telegram_id
+    TelegramAccount.user_id -> users.id
+    """
+
+    telegram_id = int(telegram_id)
+
+    try:
+        me = await telegram_client_manager.get_me(
+            telegram_id
+        )
+
+        if me is None:
+            logger.error(
+                "Connected Telegram user topilmadi: telegram_id=%s",
+                telegram_id,
+            )
+            return False
+
+        async with AsyncSessionLocal() as session:
+
+            # -------------------------------------------------
+            # INTERNAL USER
+            # -------------------------------------------------
+
+            user = await get_user_by_telegram_id(
+                session,
+                telegram_id,
+            )
+
+            if user is None:
+                logger.error(
+                    "Internal User topilmadi: telegram_id=%s",
+                    telegram_id,
+                )
+                return False
+
+            # -------------------------------------------------
+            # TELEGRAM ACCOUNT
+            # -------------------------------------------------
+
+            result = await session.execute(
+                select(TelegramAccount).where(
+                    TelegramAccount.user_id == user.id
+                )
+            )
+
+            account = result.scalar_one_or_none()
+
+            username = (
+                me.username
+                if me.username
+                else None
+            )
+
+            if account is None:
+                account = TelegramAccount(
+                    user_id=user.id,
+                    telegram_id=int(me.id),
+                    phone=None,
+                    username=username,
+                    session_name=f"{telegram_id}",
+                    status="connected",
+                    auto_reply_enabled=True,
+                    is_connected=True,
+                )
+
+                session.add(account)
+
+            else:
+                account.telegram_id = int(me.id)
+                account.username = username
+                account.status = "connected"
+                account.is_connected = True
+
+                if not account.session_name:
+                    account.session_name = f"{telegram_id}"
+
+            await session.commit()
+
+            logger.info(
+                "Telegram account saved: user_id=%s telegram_id=%s",
+                user.id,
+                me.id,
+            )
+
+            return True
+
+    except Exception:
+        logger.exception(
+            "Failed to save connected Telegram account: "
+            "telegram_id=%s",
+            telegram_id,
+        )
+        return False
+
+
+# =========================================================
+# CONNECTION STATUS
+# =========================================================
 
 async def get_connection_status(
     telegram_id: int,
 ) -> bool:
     """
-    Telegram ID orqali User topiladi.
-    Keyin User.id orqali TelegramAccount qidiriladi.
+    Telegram akkauntining ulanish holatini tekshiradi.
+
+    Avval active Telethon session tekshiriladi,
+    keyin database holati tekshiriladi.
     """
 
     telegram_id = int(telegram_id)
 
-    async with AsyncSessionLocal() as session:
-        user = await get_user_by_telegram_id(
-            session,
+    # ---------------------------------------------------------
+    # TELETHON SESSION
+    # ---------------------------------------------------------
+
+    try:
+        authorized = (
+            await telegram_client_manager
+            .is_authorized(
+                telegram_id
+            )
+        )
+
+        if authorized:
+            return True
+
+    except Exception:
+        logger.exception(
+            "Telethon authorization check failed: "
+            "telegram_id=%s",
             telegram_id,
         )
 
-        if user is None:
-            return False
+    # ---------------------------------------------------------
+    # DATABASE
+    # ---------------------------------------------------------
 
-        result = await session.execute(
-            select(TelegramAccount).where(
-                TelegramAccount.user_id == user.id
-            )
-        )
+    try:
+        async with AsyncSessionLocal() as session:
 
-        account = result.scalar_one_or_none()
-
-        if not account:
-            return False
-
-        if not account.is_connected:
-            return False
-
-        db_user_id = user.id
-
-    authorized = (
-        await telegram_client_manager
-        .is_authorized(telegram_id)
-    )
-
-    if authorized:
-        return True
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(TelegramAccount).where(
-                TelegramAccount.user_id == db_user_id
-            )
-        )
-
-        account = result.scalar_one_or_none()
-
-        if account:
-            account.is_connected = False
-            account.status = "disconnected"
-
-            await session.commit()
-
-    return False
-
-
-async def save_connected_account(
-    telegram_id: int,
-    result: dict,
-) -> None:
-    """
-    Telegram ID orqali User topadi.
-    TelegramAccount.user_id ga esa User.id yozadi.
-    """
-
-    telegram_id = int(telegram_id)
-
-    connected_telegram_id = result.get(
-        "telegram_id"
-    )
-
-    if not connected_telegram_id:
-        raise RuntimeError(
-            "Telegram ID olinmadi."
-        )
-
-    connected_telegram_id = int(
-        connected_telegram_id
-    )
-
-    username = result.get(
-        "username"
-    )
-
-    async with AsyncSessionLocal() as session:
-        user = await get_user_by_telegram_id(
-            session,
-            telegram_id,
-        )
-
-        if user is None:
-            raise RuntimeError(
-                "Bot foydalanuvchisi database'dan topilmadi."
+            user = await get_user_by_telegram_id(
+                session,
+                telegram_id,
             )
 
-        result_query = await session.execute(
-            select(TelegramAccount).where(
-                TelegramAccount.user_id == user.id
-            )
-        )
+            if user is None:
+                return False
 
-        account = result_query.scalar_one_or_none()
-
-        if account:
-            account.telegram_id = connected_telegram_id
-            account.is_connected = True
-            account.status = "connected"
-
-            if not account.session_name:
-                account.session_name = (
-                    f"user_{telegram_id}"
+            result = await session.execute(
+                select(TelegramAccount).where(
+                    TelegramAccount.user_id == user.id
                 )
-
-            if hasattr(account, "username"):
-                account.username = username
-
-        else:
-            account = TelegramAccount(
-                user_id=user.id,
-                telegram_id=connected_telegram_id,
-                phone=None,
-                username=username,
-                session_name=f"user_{telegram_id}",
-                is_connected=True,
-                status="connected",
             )
 
-            session.add(account)
+            account = result.scalar_one_or_none()
 
-        await session.commit()
+            if account is None:
+                return False
 
-    logger.info(
-        "Telegram account connected: "
-        "telegram_user=%s "
-        "telegram_account=%s "
-        "username=%s",
-        telegram_id,
-        connected_telegram_id,
-        username,
-    )
+            return bool(
+                account.is_connected
+                and account.status == "connected"
+            )
 
+    except Exception:
+        logger.exception(
+            "Database connection status check failed: "
+            "telegram_id=%s",
+            telegram_id,
+        )
+
+        return False
+
+
+# =========================================================
+# EXPORTS
+# =========================================================
 
 __all__ = [
     "router",
     "TelegramConnectStates",
-    "get_connection_status",
+    "telegram_connect_menu",
+    "telegram_disconnect",
+    "telegram_status",
+    "receive_phone",
+    "receive_code",
+    "receive_password",
     "save_connected_account",
+    "get_connection_status",
 ]
