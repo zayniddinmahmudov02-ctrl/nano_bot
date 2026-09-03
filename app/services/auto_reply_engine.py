@@ -69,13 +69,21 @@ class AutoReplyEngine:
         telegram_account_id: int,
     ):
         async with AsyncSessionLocal() as session:
+            # MUHIM: barcha FAOL Auto Reply qoidalari olinadi
+            # (.all() — .first() emas). Har bir qoida keyinroq
+            # _handle_message ichida mustaqil ravishda tekshiriladi.
+            # ORDER BY — moslik tartibini bashorat qilinadigan
+            # qiladi (eng oldin yaratilgan qoida birinchi
+            # tekshiriladi).
             result = await session.execute(
-                select(AutoReply).where(
+                select(AutoReply)
+                .where(
                     AutoReply.user_id == db_user_id,
                     AutoReply.telegram_account_id
                     == telegram_account_id,
                     AutoReply.is_active.is_(True),
                 )
+                .order_by(AutoReply.id.asc())
             )
 
             replies = result.scalars().unique().all()
@@ -147,6 +155,7 @@ class AutoReplyEngine:
         auto_reply: dict,
     ) -> bool:
         try:
+            auto_reply_id = auto_reply.get("id")
             message_type = auto_reply["message_type"]
             message_text = auto_reply["message_text"]
             file_id = auto_reply["file_id"]
@@ -174,35 +183,32 @@ class AutoReplyEngine:
                     message_text
                 )
 
-            elif message_type == "photo":
-                if not file_id:
-                    return False
-
-                await client.send_file(
-                    event.chat_id,
-                    file_id,
-                    caption=message_text or None,
+            elif message_type in (
+                "photo",
+                "video",
+                "document",
+            ):
+                # MUHIM: bu yerga faqat Storage Channel'ga hali
+                # ko'chirilmagan ESKI (legacy) yozuvlar tushadi
+                # (storage_chat_id/storage_message_id yo'q).
+                #
+                # Ularda saqlangan file_id — Telegram Bot API
+                # file_id, Telethon uchun yaroqsiz. Uni
+                # client.send_file()'ga to'g'ridan-to'g'ri
+                # uzatish doimo:
+                #   ValueError: Failed to convert ... to media
+                # xatosiga olib keladi. Shu sababli bunday
+                # urinish butunlay OLIB TASHLANDI — o'rniga
+                # xavfsiz "skip" qilinadi va logga yoziladi.
+                logger.warning(
+                    "Legacy Auto Reply (id=%s) uchun Storage "
+                    "reference topilmadi — eski Bot API "
+                    "file_id Telethon orqali yuborilmaydi. "
+                    "Auto Reply'ni tahrirlash orqali qayta "
+                    "saqlang.",
+                    auto_reply_id,
                 )
-
-            elif message_type == "video":
-                if not file_id:
-                    return False
-
-                await client.send_file(
-                    event.chat_id,
-                    file_id,
-                    caption=message_text or None,
-                )
-
-            elif message_type == "document":
-                if not file_id:
-                    return False
-
-                await client.send_file(
-                    event.chat_id,
-                    file_id,
-                    caption=message_text or None,
-                )
+                return False
 
             elif message_type == "link":
                 if not link:
@@ -361,13 +367,35 @@ class AutoReplyEngine:
             if not auto_replies:
                 return
 
+            logger.debug(
+                "Incoming message: telegram_id=%s, "
+                "tekshiriladigan qoidalar soni=%s",
+                telegram_id,
+                len(auto_replies),
+            )
+
+            # MUHIM: har bir FAOL qoida MUSTAQIL tekshiriladi.
+            # Bitta xabarga faqat birinchi mos kelgan qoida
+            # javob beradi (loyihadagi mavjud
+            # duplicate-prevention xatti-harakati saqlanadi) —
+            # lekin har bir alohida xabar o'zining mos keluvchi
+            # qoidasini har doim topadi, chunki ro'yxat har safar
+            # bazadan to'liq qayta olinadi (.all(), .first() emas).
             for auto_reply in auto_replies:
                 keywords = auto_reply["keywords"]
 
-                if not self._keyword_matches(
+                matched = self._keyword_matches(
                     text,
                     keywords,
-                ):
+                )
+
+                logger.debug(
+                    "Auto Reply id=%s tekshirildi: mos=%s",
+                    auto_reply.get("id"),
+                    matched,
+                )
+
+                if not matched:
                     continue
 
                 sent = await self._send_auto_reply(
@@ -376,6 +404,14 @@ class AutoReplyEngine:
                     ),
                     event=event,
                     auto_reply=auto_reply,
+                )
+
+                logger.info(
+                    "Auto Reply id=%s mos keldi "
+                    "(telegram_id=%s): yuborildi=%s",
+                    auto_reply.get("id"),
+                    telegram_id,
+                    sent,
                 )
 
                 if sent:
