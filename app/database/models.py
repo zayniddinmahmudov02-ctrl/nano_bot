@@ -545,6 +545,150 @@ class TelegramStorageChannel(Base):
 
 
 # ============================================================
+# TERMS ACCEPTANCE
+# ============================================================
+#
+# Telegram akkaunt ulashdan oldin foydalanuvchi rozilik
+# bildirgan shartnoma versiyasini qayd etadi.
+
+class TermsAcceptance(Base):
+    __tablename__ = "terms_acceptances"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "terms_version",
+            name="uq_terms_acceptances_user_version",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    terms_version: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+# ============================================================
+# SECURITY EVENT
+# ============================================================
+#
+# Xavfsizlik hodisalarining audit yozuvi. Hech qachon maxfiy
+# qiymat (token/parol/session) saqlanmaydi — faqat
+# "safe_description" va sanitized metadata.
+
+class SecurityEvent(Base):
+    __tablename__ = "security_events"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    event_type: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+
+    severity: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        index=True,
+    )
+
+    safe_description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    source: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    telegram_account_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("telegram_accounts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    metadata_json: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+
+# ============================================================
+# BOT SETTINGS
+# ============================================================
+#
+# Yagona (singleton, id=1) qator — Admin Panel orqali
+# boshqariladigan runtime sozlamalar (masalan maintenance mode).
+
+class BotSettings(Base):
+    __tablename__ = "bot_settings"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    maintenance_mode: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+
+    maintenance_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+# ============================================================
 # REFERRAL
 # ============================================================
 

@@ -1,7 +1,8 @@
 import logging
+from typing import Optional
 
 from aiogram import Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import Message
 from sqlalchemy import select
 
@@ -19,6 +20,29 @@ from app.services.user_service import get_or_create_user
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+REFERRAL_DEEP_LINK_PREFIX = "ref_"
+
+
+def _extract_referral_code(
+    payload: Optional[str],
+) -> Optional[str]:
+    """
+    "/start ref_XXXXX" ko'rinishidagi deep link payload'dan
+    referral kodini ajratib oladi.
+    """
+
+    if not payload:
+        return None
+
+    payload = payload.strip()
+
+    if not payload.startswith(REFERRAL_DEEP_LINK_PREFIX):
+        return None
+
+    code = payload[len(REFERRAL_DEEP_LINK_PREFIX):].strip()
+
+    return code or None
 
 
 async def initialize_user_data(user: User) -> None:
@@ -125,7 +149,10 @@ async def initialize_user_data(user: User) -> None:
         await session.commit()
 
 
-async def process_start(message: Message) -> None:
+async def process_start(
+    message: Message,
+    referral_payload: Optional[str] = None,
+) -> None:
     telegram_user = message.from_user
 
     if telegram_user is None:
@@ -142,11 +169,56 @@ async def process_start(message: Message) -> None:
                 telegram_user,
             )
 
+            # MUHIM: flush() DB'ga yozadi, lekin commit()
+            # qilinmaguncha tranzaksiya rollback bo'lishi
+            # mumkin — shu sabab user hech qachon saqlanmay
+            # qolib, keyingi FK insertlar (UserSettings va h.k.)
+            # xato berishi mumkin edi.
+            await session.commit()
+
         # -------------------------------------------------
         # USER DATA
         # -------------------------------------------------
 
         await initialize_user_data(user)
+
+        # -------------------------------------------------
+        # REFERRAL (deep link: t.me/bot?start=ref_XXXXX)
+        # -------------------------------------------------
+
+        referral_code = _extract_referral_code(
+            referral_payload
+        )
+
+        if referral_code:
+            try:
+                # Circular importni oldini olish uchun
+                # funksiya ichida import qilinadi.
+                from app.handlers.referrals import (
+                    apply_referral,
+                )
+
+                async with AsyncSessionLocal() as session:
+                    applied = await apply_referral(
+                        session,
+                        new_user_id=user.id,
+                        referral_code=referral_code,
+                    )
+
+                    await session.commit()
+
+                if applied:
+                    logger.info(
+                        "Referral qo'llandi: new_user_id=%s",
+                        user.id,
+                    )
+
+            except Exception:
+                logger.exception(
+                    "Referralni qo'llashda xatolik: "
+                    "new_user_id=%s",
+                    user.id,
+                )
 
         # -------------------------------------------------
         # MAIN MENU
@@ -172,8 +244,11 @@ async def process_start(message: Message) -> None:
 
 
 @router.message(CommandStart())
-async def start_handler(message: Message) -> None:
-    await process_start(message)
+async def start_handler(
+    message: Message,
+    command: CommandObject,
+) -> None:
+    await process_start(message, command.args)
 
 
 __all__ = [

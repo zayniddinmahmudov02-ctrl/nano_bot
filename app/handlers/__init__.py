@@ -7,6 +7,7 @@ from app.handlers.statistics import router as statistics_router
 from app.handlers.language import router as language_router
 from app.handlers.settings import router as settings_router
 from app.handlers.premium import router as premium_router
+from app.handlers.admin import router as admin_router
 
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "language_router",
     "settings_router",
     "premium_router",
+    "admin_router",
 ]

@@ -574,6 +574,16 @@ class AutoReplyEngine:
             "AutoReplyEngine to‘xtatildi."
         )
 
+    # =====================================================
+    # STATUS (monitoring uchun)
+    # =====================================================
+
+    def active_account_count(self) -> int:
+        return len(self._active_accounts)
+
+    def is_running(self) -> bool:
+        return self._running
+
 
 auto_reply_engine = AutoReplyEngine()
 

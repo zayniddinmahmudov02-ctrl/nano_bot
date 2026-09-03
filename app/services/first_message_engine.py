@@ -509,6 +509,13 @@ class FirstMessageEngine:
 
         logger.info("FirstMessageEngine to'xtatildi.")
 
+    # =====================================================
+    # STATUS (monitoring uchun)
+    # =====================================================
+
+    def active_account_count(self) -> int:
+        return len(self._active_accounts)
+
 
 first_message_engine = FirstMessageEngine()
 

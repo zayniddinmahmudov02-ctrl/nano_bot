@@ -5,7 +5,12 @@ import logging
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from sqlalchemy import select
 
 from telethon.errors import (
@@ -22,6 +27,13 @@ from app.keyboards.telegram import telegram_menu_keyboard
 from app.services.auto_reply_engine import auto_reply_engine
 from app.services.first_message_engine import first_message_engine
 from app.services.storage_channel_service import ensure_storage_channel
+from app.services.terms_service import (
+    TERMS_GATE_TEXT,
+    TERMS_PAGE_COUNT,
+    get_terms_page,
+    has_accepted_terms,
+    record_terms_acceptance,
+)
 from app.services.user_service import (
     get_connected_telegram_account,
     get_user_by_telegram_id,
@@ -68,16 +80,238 @@ async def telegram_connect_menu(
         )
         return
 
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.\n\n"
+                "Iltimos, /start buyrug‘ini bosing.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        db_user_id = user.id
+
+    accepted = await has_accepted_terms(db_user_id)
+
+    if accepted:
+        await _start_phone_prompt(message, state)
+        return
+
+    await message.answer(
+        TERMS_GATE_TEXT,
+        reply_markup=_terms_gate_keyboard(),
+    )
+
+
+# ============================================================
+# SHARTNOMA (TERMS OF USE)
+# ============================================================
+
+def _terms_gate_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📄 Shartlarni ko‘rish",
+                    callback_data="terms:view",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✅ Qabul qilaman",
+                    callback_data="terms:accept",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Bekor qilish",
+                    callback_data="terms:cancel",
+                ),
+            ],
+        ]
+    )
+
+
+def _terms_page_keyboard(index: int) -> InlineKeyboardMarkup:
+    nav_row = []
+
+    if index > 0:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="◀️ Oldingi",
+                callback_data=f"terms:page:{index - 1}",
+            )
+        )
+
+    if index < TERMS_PAGE_COUNT - 1:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="Keyingi ▶️",
+                callback_data=f"terms:page:{index + 1}",
+            )
+        )
+
+    rows = []
+
+    if nav_row:
+        rows.append(nav_row)
+
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="✅ Qabul qilaman",
+                callback_data="terms:accept",
+            ),
+            InlineKeyboardButton(
+                text="❌ Bekor qilish",
+                callback_data="terms:cancel",
+            ),
+        ]
+    )
+
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="◀️ Orqaga",
+                callback_data="terms:back",
+            ),
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _start_phone_prompt(
+    message,
+    state: FSMContext,
+) -> None:
     await message.answer(
         "📱 <b>Telegram ulash</b>\n\n"
         "Shaxsiy Telegram akkauntingizni Nano-Botga ulang.\n\n"
-        "Ulash uchun telefon raqamingizni xalqaro formatda yuboring.\n\n"
+        "Ulash uchun telefon raqamingizni xalqaro formatda "
+        "yuboring.\n\n"
         "Masalan:\n"
         "<code>+998901234567</code>",
         reply_markup=telegram_menu_keyboard(connected=False),
     )
 
     await state.set_state(TelegramConnectStates.waiting_phone)
+
+
+@router.callback_query(F.data == "terms:view")
+async def terms_view(callback: CallbackQuery) -> None:
+    await callback.answer()
+
+    try:
+        await callback.message.edit_text(
+            get_terms_page(0),
+            reply_markup=_terms_page_keyboard(0),
+        )
+    except Exception:
+        await callback.message.answer(
+            get_terms_page(0),
+            reply_markup=_terms_page_keyboard(0),
+        )
+
+
+@router.callback_query(F.data.startswith("terms:page:"))
+async def terms_page(callback: CallbackQuery) -> None:
+    await callback.answer()
+
+    try:
+        index = int(callback.data.split(":")[-1])
+    except ValueError:
+        index = 0
+
+    try:
+        await callback.message.edit_text(
+            get_terms_page(index),
+            reply_markup=_terms_page_keyboard(index),
+        )
+    except Exception:
+        logger.exception(
+            "Terms sahifasini yangilab bo'lmadi."
+        )
+
+
+@router.callback_query(F.data == "terms:back")
+async def terms_back(callback: CallbackQuery) -> None:
+    await callback.answer()
+
+    try:
+        await callback.message.edit_text(
+            TERMS_GATE_TEXT,
+            reply_markup=_terms_gate_keyboard(),
+        )
+    except Exception:
+        await callback.message.answer(
+            TERMS_GATE_TEXT,
+            reply_markup=_terms_gate_keyboard(),
+        )
+
+
+@router.callback_query(F.data == "terms:cancel")
+async def terms_cancel(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+    await callback.answer("❌ Bekor qilindi.")
+
+    try:
+        await callback.message.edit_text(
+            "❌ Telegram ulash bekor qilindi."
+        )
+    except Exception:
+        pass
+
+    await callback.message.answer(
+        "🏠 <b>Bosh menyu</b>",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "terms:accept")
+async def terms_accept(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await callback.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                show_alert=True,
+            )
+            return
+
+        db_user_id = user.id
+
+    await record_terms_acceptance(db_user_id)
+
+    await callback.answer("✅ Qabul qilindi.")
+
+    try:
+        await callback.message.edit_text(
+            "✅ <b>Shartlar qabul qilindi.</b>"
+        )
+    except Exception:
+        pass
+
+    await _start_phone_prompt(callback.message, state)
 
 
 # ============================================================

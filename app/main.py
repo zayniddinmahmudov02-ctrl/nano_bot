@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from app.config import BOT_TOKEN
+from app.config import BOT_TOKEN, LOG_LEVEL
 from app.database.db import (
     check_database,
     close_database,
@@ -25,27 +24,22 @@ from app.handlers import (
     language_router,
     settings_router,
     premium_router,
+    admin_router,
 )
+from app.middlewares import MaintenanceMiddleware
 from app.services.auto_reply_engine import auto_reply_engine
 from app.services.first_message_engine import first_message_engine
+from app.services.security_service import set_bot_instance
 from app.telegram.user_client import telegram_client_manager
+from app.utils.logger import configure_logging
 
 
 # ============================================================
 # LOGGING
 # ============================================================
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(name)s | "
-        "%(message)s"
-    ),
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
+configure_logging(
+    level=getattr(logging, LOG_LEVEL, logging.INFO)
 )
 
 logger = logging.getLogger("nano_bot")
@@ -88,6 +82,12 @@ def create_dispatcher() -> Dispatcher:
 
     dp = Dispatcher()
 
+    # Maintenance mode yoqilganda admin bo'lmagan foydalanuvchi
+    # so'rovlarini bloklaydi (admin uchun har doim o'tkaziladi).
+    maintenance_middleware = MaintenanceMiddleware()
+    dp.message.outer_middleware(maintenance_middleware)
+    dp.callback_query.outer_middleware(maintenance_middleware)
+
     return dp
 
 
@@ -126,6 +126,9 @@ def register_routers(dp: Dispatcher) -> None:
 
     # Premium
     dp.include_router(premium_router)
+
+    # Admin panel
+    dp.include_router(admin_router)
 
     logger.info("Barcha handler routerlar yuklandi.")
 
@@ -313,6 +316,10 @@ async def main() -> None:
 
     bot = create_bot()
     dp = create_dispatcher()
+
+    # Security alertlarni admin(lar)ga yuborish uchun Bot
+    # obyektiga referens beriladi.
+    set_bot_instance(bot)
 
     register_routers(dp)
 
