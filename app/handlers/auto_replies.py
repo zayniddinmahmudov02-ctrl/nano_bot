@@ -721,10 +721,12 @@ async def list_auto_replies(
             user.id,
         )
 
-    keyboard = (
-        auto_reply_list_inline_keyboard(indexed_ids)
-        if indexed_ids
-        else None
+    # MUHIM: indexed_ids bo'sh bo'lsa ham (hali Auto Reply
+    # yo'q), klaviatura HAR DOIM ko'rsatiladi — aks holda
+    # "➕ Yangi avto javob" tugmasi ko'rinmay qolib, foydalanuvchi
+    # birinchi Auto Reply'ni yaratish imkoniyatidan mahrum bo'lardi.
+    keyboard = auto_reply_list_inline_keyboard(
+        indexed_ids or []
     )
 
     await message.answer(
@@ -766,10 +768,120 @@ async def ar_back_to_list(
 
     await callback.answer()
 
-    keyboard = (
-        auto_reply_list_inline_keyboard(indexed_ids)
-        if indexed_ids
-        else None
+    # MUHIM: indexed_ids bo'sh bo'lsa ham (hali Auto Reply
+    # yo'q), klaviatura HAR DOIM ko'rsatiladi — aks holda
+    # "➕ Yangi avto javob" tugmasi ko'rinmay qolib, foydalanuvchi
+    # birinchi Auto Reply'ni yaratish imkoniyatidan mahrum bo'lardi.
+    keyboard = auto_reply_list_inline_keyboard(
+        indexed_ids or []
+    )
+
+    await _safe_edit(callback, text, keyboard)
+
+
+# ============================================================
+# ADD (INLINE ENTRY — ro'yxat ekranidagi "➕ Yangi avto javob")
+# ============================================================
+
+@router.callback_query(F.data == "ar:add")
+async def ar_add_start(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await callback.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                show_alert=True,
+            )
+            return
+
+        if not await has_connected_account(session, user.id):
+            await callback.answer(
+                "❌ Avval Telegram akkauntingizni ulang "
+                "(Nano-Agent → 📱 Telegram ulash).",
+                show_alert=True,
+            )
+            return
+
+        limit = await get_auto_reply_limit(session, user.id)
+
+        result = await session.execute(
+            select(func.count(AutoReply.id)).where(
+                AutoReply.user_id == user.id
+            )
+        )
+
+        current_count = result.scalar_one()
+
+    if limit is not None and current_count >= limit:
+        await callback.answer(
+            "⚠️ Avto javob limitiga yetdingiz "
+            f"({current_count}/{limit}).",
+            show_alert=True,
+        )
+        return
+
+    await state.set_state(AutoReplyStates.waiting_keywords)
+
+    await callback.answer()
+
+    await _safe_edit(
+        callback,
+        "🔑 <b>Kalit so‘zlarni kiriting</b>\n\n"
+        "Bir nechta kalit so‘zni vergul bilan ajrating.\n\n"
+        "Masalan:\n"
+        "<code>salom, assalomu alaykum, hello</code>",
+        auto_reply_cancel_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "ar:add:cancel")
+async def ar_add_cancel(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await callback.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                show_alert=True,
+            )
+            return
+
+        text, indexed_ids = await _render_list(
+            session,
+            user.id,
+        )
+
+    await callback.answer("❌ Bekor qilindi.")
+
+    keyboard = auto_reply_list_inline_keyboard(
+        indexed_ids or []
     )
 
     await _safe_edit(callback, text, keyboard)
@@ -1055,10 +1167,12 @@ async def ar_delete_yes(
 
     await callback.answer("🗑 O‘chirildi.")
 
-    keyboard = (
-        auto_reply_list_inline_keyboard(indexed_ids)
-        if indexed_ids
-        else None
+    # MUHIM: indexed_ids bo'sh bo'lsa ham (hali Auto Reply
+    # yo'q), klaviatura HAR DOIM ko'rsatiladi — aks holda
+    # "➕ Yangi avto javob" tugmasi ko'rinmay qolib, foydalanuvchi
+    # birinchi Auto Reply'ni yaratish imkoniyatidan mahrum bo'lardi.
+    keyboard = auto_reply_list_inline_keyboard(
+        indexed_ids or []
     )
 
     await _safe_edit(callback, text, keyboard)

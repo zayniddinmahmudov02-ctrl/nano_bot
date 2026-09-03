@@ -184,6 +184,24 @@ def _terms_page_keyboard(index: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _telegram_input_cancel_keyboard() -> InlineKeyboardMarkup:
+    """
+    Telefon/kod/2FA parol kiritish bosqichlarida ko'rsatiladigan
+    yagona inline "Bekor qilish" tugmasi — ReplyKeyboard o'rniga.
+    """
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="❌ Bekor qilish",
+                    callback_data="nano:agent:telegram:cancel",
+                ),
+            ],
+        ]
+    )
+
+
 async def _start_phone_prompt(
     message,
     state: FSMContext,
@@ -195,7 +213,7 @@ async def _start_phone_prompt(
         "yuboring.\n\n"
         "Masalan:\n"
         "<code>+998901234567</code>",
-        reply_markup=telegram_menu_keyboard(connected=False),
+        reply_markup=_telegram_input_cancel_keyboard(),
     )
 
     await state.set_state(TelegramConnectStates.waiting_phone)
@@ -531,7 +549,8 @@ async def receive_phone(
             "Masalan:\n"
             "<code>7 5 8 1 1</code>\n\n"
             "⚠️ <b>Kodni copy-paste qilmang.</b>\n"
-            "Har bir raqamni alohida-alohida tering."
+            "Har bir raqamni alohida-alohida tering.",
+            reply_markup=_telegram_input_cancel_keyboard(),
         )
 
     except FloodWaitError as error:
@@ -680,7 +699,8 @@ async def receive_code(
             "🔐 <b>2FA parol kerak.</b>\n\n"
             "Telegram akkauntingizda ikki bosqichli himoya "
             "yoqilgan.\n\n"
-            "Iltimos, 2FA parolingizni yuboring."
+            "Iltimos, 2FA parolingizni yuboring.",
+            reply_markup=_telegram_input_cancel_keyboard(),
         )
 
         return
@@ -1286,6 +1306,50 @@ async def agent_telegram_disconnect(
             "❌ Telegram akkauntini uzishda xatolik yuz berdi.",
             show_alert=True,
         )
+
+
+@router.callback_query(F.data == "nano:agent:telegram:cancel")
+async def agent_telegram_cancel_input(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """
+    Telefon/kod/2FA parol kiritish bosqichlarining yagona
+    inline "Bekor qilish" ishlovchisi. Qaysi bosqichda
+    ekanligidan qat'i nazar, mavjud pending Telethon
+    sessiyasini (agar bo'lsa) xavfsiz tozalaydi.
+    """
+
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    current_state = await state.get_state()
+
+    if current_state in (
+        TelegramConnectStates.waiting_code.state,
+        TelegramConnectStates.waiting_password.state,
+    ):
+        try:
+            await telegram_client_manager.logout(telegram_id)
+        except Exception:
+            logger.exception(
+                "Pending Telegram login cleanup failed "
+                "(inline cancel): telegram_id=%s",
+                telegram_id,
+            )
+
+    await state.clear()
+
+    await callback.answer("❌ Bekor qilindi.")
+
+    await _safe_edit_connect(
+        callback,
+        "❌ Telegram ulash bekor qilindi.",
+        _telegram_disconnected_inline_keyboard(),
+    )
 
 
 # ============================================================

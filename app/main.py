@@ -6,7 +6,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import ErrorEvent
+from aiogram.types import BotCommand, ErrorEvent, MenuButtonCommands
 
 from app.config import BOT_TOKEN, LOG_LEVEL
 from app.database.db import (
@@ -73,6 +73,47 @@ def create_bot() -> Bot:
     )
 
     return bot
+
+
+# ============================================================
+# TELEGRAM MENU BUTTON / BOT COMMANDS
+# ============================================================
+#
+# Bot uchun standart Telegram "Menu" tugmasini "commands"
+# rejimida sozlaydi — bosilganda foydalanuvchiga bot
+# buyruqlari (kamida /start) ro'yxati ko'rsatiladi.
+#
+# MUHIM: Bot API'da "commands" rejimidagi Menu tugmasi matni
+# Telegram klienti tomonidan o'zi belgilanadi ("Menu" so'zi) —
+# bu faqat MenuButtonWebApp uchun moslashtiriladigan `text`
+# maydoniga ega, u esa boshqa (web app ochish) maqsad uchun.
+# Shu sababli bu yerda to'g'ri "commands" rejimi ishlatiladi.
+
+async def configure_bot_ui(bot: Bot) -> None:
+    try:
+        await bot.set_my_commands(
+            [
+                BotCommand(
+                    command="start",
+                    description="Bosh menyu",
+                ),
+            ]
+        )
+
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonCommands()
+        )
+
+        logger.info(
+            "Telegram Menu Button va BotCommand'lar "
+            "sozlandi."
+        )
+
+    except Exception:
+        logger.exception(
+            "Telegram Menu Button/BotCommand sozlashda "
+            "xatolik."
+        )
 
 
 # ============================================================
@@ -215,7 +256,7 @@ def register_routers(dp: Dispatcher) -> None:
 # STARTUP
 # ============================================================
 
-async def startup() -> None:
+async def startup(bot: Bot) -> None:
     """
     Bot ishga tushishidan oldingi barcha jarayonlar.
     """
@@ -223,6 +264,12 @@ async def startup() -> None:
     logger.info("========================================")
     logger.info("Nano-Bot startup boshlandi")
     logger.info("========================================")
+
+    # --------------------------------------------------------
+    # TELEGRAM MENU BUTTON / COMMANDS
+    # --------------------------------------------------------
+
+    await configure_bot_ui(bot)
 
     # --------------------------------------------------------
     # DATABASE
@@ -403,7 +450,7 @@ async def main() -> None:
 
     try:
         # Startup
-        await startup()
+        await startup(bot)
 
         logger.info("========================================")
         logger.info("Nano-Bot ishga tushmoqda...")

@@ -1,50 +1,60 @@
 from typing import List, Tuple
 
-from aiogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
-)
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+# ============================================================
+# MUHIM: bu modul endi FAQAT InlineKeyboardMarkup ishlatadi —
+# ReplyKeyboardMarkup/KeyboardButton butunlay olib tashlandi.
+#
+# `auto_reply_keyboard()` va `auto_reply_cancel_keyboard()`
+# ataylab nomi o'zgartirilmasdan saqlab qolindi, chunki
+# `app/handlers/auto_replies.py` ichida ko'plab joyda
+# `reply_markup=auto_reply_keyboard()` shaklida chaqiriladi —
+# funksiya endi inline klaviatura qaytargani uchun, barcha bu
+# chaqiruv joylari boshqa hech narsa o'zgartirmasdan avtomatik
+# ravishda inline'ga o'tadi.
+# ============================================================
 
 
-def auto_reply_keyboard() -> ReplyKeyboardMarkup:
-    builder = ReplyKeyboardBuilder()
+def auto_reply_keyboard() -> InlineKeyboardMarkup:
+    """
+    Avto javoblar bo'limidagi umumiy "davom etish" klaviaturasi
+    (yaratish/xatolik/limit xabarlaridan keyin ko'rsatiladi).
+    """
 
-    builder.button(text="➕ Avto javob qo‘shish")
-    builder.button(text="📋 Avto javoblarim")
-    builder.button(text="🏠 Bosh menyu")
-
-    builder.adjust(2, 1)
-
-    return builder.as_markup(
-        resize_keyboard=True,
-        is_persistent=True,
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📋 Avto javoblarim",
+                    callback_data="nano:agent:auto",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Nano-Agent",
+                    callback_data="nano:agent",
+                ),
+            ],
+        ]
     )
 
 
-def auto_reply_back_keyboard() -> ReplyKeyboardMarkup:
-    builder = ReplyKeyboardBuilder()
+def auto_reply_cancel_keyboard() -> InlineKeyboardMarkup:
+    """
+    Yangi Avto javob yaratish jarayonida (kalit so'z/post
+    kiritish bosqichlari) ko'rsatiladigan "Bekor qilish".
+    """
 
-    builder.button(text="⬅️ Orqaga")
-    builder.button(text="🏠 Bosh menyu")
-
-    builder.adjust(2)
-
-    return builder.as_markup(
-        resize_keyboard=True,
-        is_persistent=True,
-    )
-
-
-def auto_reply_cancel_keyboard() -> ReplyKeyboardMarkup:
-    builder = ReplyKeyboardBuilder()
-
-    builder.button(text="❌ Bekor qilish")
-
-    return builder.as_markup(
-        resize_keyboard=True,
-        is_persistent=True,
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="❌ Bekor qilish",
+                    callback_data="ar:add:cancel",
+                ),
+            ],
+        ]
     )
 
 
@@ -82,6 +92,15 @@ def auto_reply_list_inline_keyboard(
         ]
         for index, auto_reply_id in indexed_ids
     ]
+
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="➕ Yangi avto javob",
+                callback_data="ar:add",
+            ),
+        ]
+    )
 
     # Reply-keyboard orqali navigatsiya olib tashlangani sababli
     # (yangi yagona inline navigatsiya standarti), ro'yxat
@@ -198,7 +217,6 @@ def auto_reply_edit_cancel_inline_keyboard(
 
 __all__ = [
     "auto_reply_keyboard",
-    "auto_reply_back_keyboard",
     "auto_reply_cancel_keyboard",
     "auto_reply_list_inline_keyboard",
     "auto_reply_detail_inline_keyboard",

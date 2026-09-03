@@ -40,6 +40,12 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "⬅️ Back",
         "de": "⬅️ Zurück",
     },
+    "btn_back_main": {
+        "uz": "⬅️ Bosh menyu",
+        "ru": "⬅️ Главное меню",
+        "en": "⬅️ Main menu",
+        "de": "⬅️ Hauptmenü",
+    },
     "btn_home": {
         "uz": "🏠 Bosh menyu",
         "ru": "🏠 Главное меню",

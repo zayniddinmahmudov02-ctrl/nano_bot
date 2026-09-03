@@ -3,6 +3,7 @@ from typing import Optional
 
 from aiogram import Router
 from aiogram.filters import CommandObject, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, ReplyKeyboardRemove
 from sqlalchemy import select
 
@@ -156,6 +157,7 @@ async def initialize_user_data(user: User) -> None:
 async def process_start(
     message: Message,
     referral_payload: Optional[str] = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     telegram_user = message.from_user
 
@@ -163,6 +165,17 @@ async def process_start(
         return
 
     try:
+        # -------------------------------------------------
+        # FSM STATE
+        # -------------------------------------------------
+        # /start har doim asosiy menyuni ochadi — agar
+        # foydalanuvchi biror oldingi FSM holatida (masalan
+        # parol kiritish, kalit so'z kutish va h.k.) "qotib
+        # qolgan" bo'lsa, u tozalanadi.
+
+        if state is not None:
+            await state.clear()
+
         # -------------------------------------------------
         # USER
         # -------------------------------------------------
@@ -264,8 +277,9 @@ async def process_start(
 async def start_handler(
     message: Message,
     command: CommandObject,
+    state: FSMContext,
 ) -> None:
-    await process_start(message, command.args)
+    await process_start(message, command.args, state)
 
 
 __all__ = [

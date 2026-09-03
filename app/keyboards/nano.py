@@ -12,6 +12,24 @@ def _back(callback_data: str, lang: str) -> list:
     ]
 
 
+def _back_main(lang: str) -> list:
+    """
+    Bosh menyuga TO'G'RIDAN-TO'G'RI qaytaradigan tugma qatori
+    ("⬅️ Bosh menyu"). Nano-Agent, Nano-Yordamchi, Sozlamalar,
+    Nano-Info va Referallar — bularning barchasi bosh menyuning
+    bevosita bolalari, shu sabab ularning "orqaga" tugmasi aynan
+    shu maxsus yorliqni ishlatadi (chuqurroq ichki sahifalar esa
+    kontekstual "⬅️ Orqaga"ni davom ettiradi).
+    """
+
+    return [
+        InlineKeyboardButton(
+            text=t("btn_back_main", lang),
+            callback_data="nano:main",
+        ),
+    ]
+
+
 # ============================================================
 # MAIN MENU
 # ============================================================
@@ -84,7 +102,7 @@ def nano_agent_menu_keyboard(
                     callback_data="nano:agent:stats",
                 ),
             ],
-            _back("nano:main", lang),
+            _back_main(lang),
         ]
     )
 
@@ -110,7 +128,7 @@ def nano_assistant_menu_keyboard(
                     callback_data="nano:assistant:instagram",
                 ),
             ],
-            _back("nano:main", lang),
+            _back_main(lang),
         ]
     )
 
@@ -153,7 +171,7 @@ def nano_settings_menu_keyboard(
                     callback_data="nano:settings:password",
                 ),
             ],
-            _back("nano:main", lang),
+            _back_main(lang),
         ]
     )
 
@@ -320,7 +338,7 @@ def nano_info_menu_keyboard(
                     callback_data="nano:info:faq",
                 ),
             ],
-            _back("nano:main", lang),
+            _back_main(lang),
         ]
     )
 
@@ -354,7 +372,7 @@ def nano_referrals_keyboard(
                     callback_data="nano:referrals:stats",
                 ),
             ],
-            _back("nano:main", lang),
+            _back_main(lang),
         ]
     )
 

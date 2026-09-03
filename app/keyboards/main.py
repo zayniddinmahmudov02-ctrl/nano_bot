@@ -1,103 +1,29 @@
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup
+
+from app.keyboards.nano import nano_main_menu_keyboard
+from app.texts import DEFAULT_LANGUAGE
 
 
-def main_menu_keyboard() -> ReplyKeyboardMarkup:
+def main_menu_keyboard(
+    lang: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
     """
     Nano-Bot asosiy menyusi.
+
+    MUHIM: bu funksiya ataylab saqlab qolindi, chunki ko'plab
+    handlerlarda xavfsiz zaxira (fallback) sifatida
+    `reply_markup=main_menu_keyboard()` ko'rinishida ishlatiladi.
+    Endi u INLINE Bosh menyuni (nano_main_menu_keyboard) qaytaradi
+    — shu orqali barcha mavjud chaqiruv joylari boshqa hech narsa
+    o'zgartirmasdan avtomatik ravishda inline'ga o'tadi.
+
+    Reply-keyboard (ReplyKeyboardMarkup/KeyboardButton) endi
+    loyihaning bosh menyusi uchun umuman ishlatilmaydi.
     """
 
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(
-                    text="📱 Telegram ulash"
-                ),
-            ],
-            [
-                KeyboardButton(
-                    text="🤖 Avto javoblar"
-                ),
-                KeyboardButton(
-                    text="1️⃣ Birinchi xabar"
-                ),
-            ],
-            [
-                KeyboardButton(
-                    text="👥 Referallar"
-                ),
-                KeyboardButton(
-                    text="📊 Statistika"
-                ),
-            ],
-            [
-                KeyboardButton(
-                    text="🌐 Til"
-                ),
-                KeyboardButton(
-                    text="💎 Premium"
-                ),
-            ],
-            [
-                KeyboardButton(
-                    text="⚙️ Sozlamalar"
-                ),
-            ],
-        ],
-        resize_keyboard=True,
-        is_persistent=True,
-        input_field_placeholder="Menyudan tanlang...",
-    )
+    return nano_main_menu_keyboard(lang)
 
 
-def back_keyboard() -> ReplyKeyboardMarkup:
-    """
-    Orqaga qaytish tugmasi.
-    """
-
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(
-                    text="⬅️ Orqaga"
-                ),
-            ],
-        ],
-        resize_keyboard=True,
-    )
-
-
-def cancel_keyboard() -> ReplyKeyboardMarkup:
-    """
-    Jarayonni bekor qilish tugmasi.
-    """
-
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(
-                    text="❌ Bekor qilish"
-                ),
-            ],
-        ],
-        resize_keyboard=True,
-    )
-
-
-def back_cancel_keyboard() -> ReplyKeyboardMarkup:
-    """
-    Orqaga yoki bekor qilish.
-    """
-
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(
-                    text="⬅️ Orqaga"
-                ),
-                KeyboardButton(
-                    text="❌ Bekor qilish"
-                ),
-            ],
-        ],
-        resize_keyboard=True,
-    )
+__all__ = [
+    "main_menu_keyboard",
+]
