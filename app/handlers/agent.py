@@ -1,8 +1,9 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
 from app.database import AsyncSessionLocal
 from app.handlers.auto_replies import _render_list
@@ -42,11 +43,44 @@ async def _safe_edit(
             )
 
 
+@router.message(Command("agent"))
+async def agent_command(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """
+    Telegramning pastki Menu panelidan "/agent" tanlanganda
+    ishga tushadi — Nano-Agent bo'limi YANGI xabar sifatida
+    ochiladi (chat ichida katta doimiy inline bosh menyu yo'q).
+    """
+
+    await state.clear()
+
+    if message.from_user is None:
+        return
+
+    telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        lang = await get_user_language(session, telegram_id)
+
+    await message.answer(
+        t("agent_menu_title", lang),
+        reply_markup=nano_agent_menu_keyboard(lang),
+    )
+
+
 @router.callback_query(F.data == "nano:agent")
 async def nano_agent_menu(
     callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
+    """
+    Nano-Agent'ning ICHKI (nested) sahifalaridan "⬅️ Orqaga"
+    bosilganda shu Nano-Agent kartasiga qaytariladi — bu ICHKI
+    inline navigatsiya, asosiy 5 bo'limlik menyu emas.
+    """
+
     await state.clear()
 
     if callback.from_user is None:

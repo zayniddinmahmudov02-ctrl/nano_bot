@@ -97,9 +97,32 @@ async def configure_bot_ui(bot: Bot) -> None:
                     command="start",
                     description="Bosh menyu",
                 ),
+                BotCommand(
+                    command="agent",
+                    description="🤖 Nano-Agent",
+                ),
+                BotCommand(
+                    command="assistant",
+                    description="🤝 Nano-Yordamchi",
+                ),
+                BotCommand(
+                    command="settings",
+                    description="⚙️ Sozlamalar",
+                ),
+                BotCommand(
+                    command="info",
+                    description="ℹ️ Nano-Info",
+                ),
+                BotCommand(
+                    command="referrals",
+                    description="👥 Referallar",
+                ),
             ]
         )
 
+        # "commands" rejimi — Menu tugmasi bosilganda Telegram
+        # yuqoridagi buyruqlar ro'yxatini o'zining pastki
+        # panelida ko'rsatadi (Vizu Bot uslubidagi UX).
         await bot.set_chat_menu_button(
             menu_button=MenuButtonCommands()
         )

@@ -64,6 +64,20 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "❌ Not found.",
         "de": "❌ Nicht gefunden.",
     },
+    "welcome_short": {
+        "uz": "👋 <b>Nano-Bot</b>ga xush kelibsiz!\n\n"
+        "🤖 Kerakli bo'limni pastdagi <b>Menu</b> tugmasi "
+        "orqali tanlang.",
+        "ru": "👋 Добро пожаловать в <b>Nano-Bot</b>!\n\n"
+        "🤖 Выберите нужный раздел через кнопку <b>Menu</b> "
+        "внизу.",
+        "en": "👋 Welcome to <b>Nano-Bot</b>!\n\n"
+        "🤖 Choose the section you need via the <b>Menu</b> "
+        "button below.",
+        "de": "👋 Willkommen bei <b>Nano-Bot</b>!\n\n"
+        "🤖 Wählen Sie den gewünschten Bereich über die "
+        "Schaltfläche <b>Menu</b> unten.",
+    },
     "user_not_found": {
         "uz": "❌ Foydalanuvchi topilmadi.\n\nIltimos, /start buyrug'ini bosing.",
         "ru": "❌ Пользователь не найден.\n\nПожалуйста, нажмите /start.",

@@ -1,27 +1,30 @@
+from typing import Optional
+
 from aiogram.types import InlineKeyboardMarkup
 
-from app.keyboards.nano import nano_main_menu_keyboard
 from app.texts import DEFAULT_LANGUAGE
 
 
 def main_menu_keyboard(
     lang: str = DEFAULT_LANGUAGE,
-) -> InlineKeyboardMarkup:
+) -> Optional[InlineKeyboardMarkup]:
     """
-    Nano-Bot asosiy menyusi.
+    MUHIM: Nano-Bot'da chat ichida ko'rsatiladigan doimiy
+    "asosiy menyu" (5 ta bo'lim) ENDI UMUMAN MAVJUD EMAS —
+    na InlineKeyboard, na ReplyKeyboard ko'rinishida. Asosiy
+    navigatsiya FAQAT Telegramning o'z pastki Menu tugmasi
+    (Bot Commands: /agent, /assistant, /settings, /info,
+    /referrals) orqali amalga oshiriladi.
 
-    MUHIM: bu funksiya ataylab saqlab qolindi, chunki ko'plab
-    handlerlarda xavfsiz zaxira (fallback) sifatida
-    `reply_markup=main_menu_keyboard()` ko'rinishida ishlatiladi.
-    Endi u INLINE Bosh menyuni (nano_main_menu_keyboard) qaytaradi
-    — shu orqali barcha mavjud chaqiruv joylari boshqa hech narsa
-    o'zgartirmasdan avtomatik ravishda inline'ga o'tadi.
-
-    Reply-keyboard (ReplyKeyboardMarkup/KeyboardButton) endi
-    loyihaning bosh menyusi uchun umuman ishlatilmaydi.
+    Bu funksiya ko'plab handlerlarda xavfsiz zaxira (fallback)
+    sifatida `reply_markup=main_menu_keyboard()` ko'rinishida
+    ishlatilgani uchun nomi o'zgartirilmasdan saqlab qolindi —
+    lekin endi u hech qanday klaviatura qaytarmaydi (`None`),
+    shunda foydalanuvchi pastdagi Menu tugmasidan foydalanishga
+    yo'naltiriladi.
     """
 
-    return nano_main_menu_keyboard(lang)
+    return None
 
 
 __all__ = [

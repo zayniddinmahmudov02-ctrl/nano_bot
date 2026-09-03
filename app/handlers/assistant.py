@@ -1,6 +1,7 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, FSInputFile, Message
@@ -68,6 +69,32 @@ async def _safe_edit(
             logger.exception(
                 "Nano-Yordamchi xabarini yangilab bo'lmadi."
             )
+
+
+@router.message(Command("assistant"))
+async def assistant_command(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """
+    Telegramning pastki Menu panelidan "/assistant" tanlanganda
+    ishga tushadi.
+    """
+
+    await state.clear()
+
+    if message.from_user is None:
+        return
+
+    telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        lang = await get_user_language(session, telegram_id)
+
+    await message.answer(
+        t("assistant_menu_title", lang),
+        reply_markup=nano_assistant_menu_keyboard(lang),
+    )
 
 
 @router.callback_query(F.data == "nano:assistant")

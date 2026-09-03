@@ -2,10 +2,9 @@ import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 
 from app.database import AsyncSessionLocal
-from app.keyboards.nano import nano_main_menu_keyboard
 from app.services.user_service import get_user_language
 from app.texts import t
 
@@ -41,6 +40,14 @@ async def nano_main_menu(
     callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
+    """
+    MUHIM: bu ENDI "5 tugmali asosiy menyu" ko'rsatmaydi — bunday
+    inline ekran umuman yo'q. Bu faqat ICHKI bo'limlardagi
+    "⬅️ Bosh menyu" tugmasining nishoni: xabarni oddiy, inline
+    klaviaturasiz holatga qaytaradi va foydalanuvchini pastdagi
+    Telegram Menu tugmasidan foydalanishga yo'naltiradi.
+    """
+
     await state.clear()
 
     if callback.from_user is None:
@@ -54,10 +61,11 @@ async def nano_main_menu(
 
     await callback.answer()
 
+    # Bo'sh inline_keyboard — mavjud klaviaturani olib tashlaydi.
     await _safe_edit(
         callback,
-        t("main_menu_title", lang),
-        nano_main_menu_keyboard(lang),
+        t("welcome_short", lang),
+        InlineKeyboardMarkup(inline_keyboard=[]),
     )
 
 

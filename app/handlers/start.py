@@ -4,7 +4,7 @@ from typing import Optional
 from aiogram import Router
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
@@ -15,7 +15,6 @@ from app.database.models import (
     User,
     UserSettings,
 )
-from app.keyboards.nano import nano_main_menu_keyboard
 from app.services.user_service import (
     get_or_create_user,
     get_user_language,
@@ -238,8 +237,13 @@ async def process_start(
                 )
 
         # -------------------------------------------------
-        # MAIN MENU (yangi — to'liq INLINE navigatsiya)
+        # QISQA SALOMLASHUV (navigatsiya YO'Q)
         # -------------------------------------------------
+        # MUHIM: bu yerda chatga na katta InlineKeyboard, na
+        # ReplyKeyboardMarkup yuborilmaydi. Navigatsiya FAQAT
+        # Telegramning o'z pastki Menu tugmasi (Bot Commands)
+        # orqali amalga oshiriladi — u alohida, bot ishga
+        # tushganda `configure_bot_ui()` orqali sozlanadi.
 
         async with AsyncSessionLocal() as session:
             lang = await get_user_language(
@@ -247,19 +251,8 @@ async def process_start(
                 telegram_user.id,
             )
 
-        # Eski persistent ReplyKeyboard endi navigatsiya
-        # uchun ishlatilmaydi — uni tozalaymiz, so'ng yangi
-        # inline Bosh menyuni ko'rsatamiz.
         await message.answer(
-            "👋 <b>Nano-Bot</b>ga xush kelibsiz!\n\n"
-            "🤖 Shaxsiy Telegram akkauntingiz uchun "
-            "avtomatlashtirish imkoniyatlaridan foydalaning.",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-
-        await message.answer(
-            t("main_menu_title", lang),
-            reply_markup=nano_main_menu_keyboard(lang),
+            t("welcome_short", lang),
         )
 
     except Exception:

@@ -3,6 +3,7 @@ import secrets
 import string
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
@@ -463,6 +464,34 @@ async def _render_referrals_text(
         "🎁 <b>Bonuslar:</b>\n"
         "Har bir taklif qilingan foydalanuvchi Auto Reply "
         "limitingizni oshiradi."
+    )
+
+
+@router.message(Command("referrals"))
+async def referrals_command(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """
+    Telegramning pastki Menu panelidan "/referrals" tanlanganda
+    ishga tushadi.
+    """
+
+    await state.clear()
+
+    if message.from_user is None:
+        return
+
+    telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        lang = await get_user_language(session, telegram_id)
+
+    text = await _render_referrals_text(telegram_id, lang)
+
+    await message.answer(
+        text,
+        reply_markup=nano_referrals_keyboard(lang),
     )
 
 

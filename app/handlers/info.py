@@ -1,8 +1,14 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from app.database import AsyncSessionLocal
 from app.keyboards.nano import nano_info_menu_keyboard, nano_info_sub_keyboard
@@ -140,6 +146,32 @@ async def _safe_edit(
             logger.exception(
                 "Nano-Info xabarini yangilab bo'lmadi."
             )
+
+
+@router.message(Command("info"))
+async def info_command(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """
+    Telegramning pastki Menu panelidan "/info" tanlanganda
+    ishga tushadi.
+    """
+
+    await state.clear()
+
+    if message.from_user is None:
+        return
+
+    telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        lang = await get_user_language(session, telegram_id)
+
+    await message.answer(
+        t("info_menu_title", lang),
+        reply_markup=nano_info_menu_keyboard(lang),
+    )
 
 
 @router.callback_query(F.data == "nano:info")

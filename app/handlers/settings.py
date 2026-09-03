@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timezone
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -74,6 +75,32 @@ async def _safe_edit(
 # ============================================================
 # SETTINGS MENU
 # ============================================================
+
+@router.message(Command("settings"))
+async def settings_command(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """
+    Telegramning pastki Menu panelidan "/settings" tanlanganda
+    ishga tushadi.
+    """
+
+    await state.clear()
+
+    if message.from_user is None:
+        return
+
+    telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        lang = await get_user_language(session, telegram_id)
+
+    await message.answer(
+        t("settings_menu_title", lang),
+        reply_markup=nano_settings_menu_keyboard(lang),
+    )
+
 
 @router.callback_query(F.data == "nano:settings")
 async def nano_settings_menu(
