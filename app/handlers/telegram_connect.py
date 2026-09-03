@@ -1034,6 +1034,261 @@ async def get_connection_status(
 
 
 # ============================================================
+# INLINE ENTRY POINT (Nano-Agent → 📱 Telegram ulash)
+# ============================================================
+#
+# Eski reply-keyboard triggerlar ("📱 Telegram ulash" matni)
+# hamon ishlaydi (mavjud funksiyani yo'qotmaslik uchun), lekin
+# yangi Bosh menyu ularni ko'rsatmaydi — endi shu bo'lim Nano-
+# Agent ichidagi inline tugma orqali ochiladi. Pastdagi
+# handlerlar xuddi shu mavjud logikani (get_connection_status,
+# has_accepted_terms, _start_phone_prompt, terms gate) qayta
+# ishlatadi — dublikat qilinmaydi.
+
+def _telegram_connected_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Holatni tekshirish",
+                    callback_data="nano:agent:telegram:status",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔌 Telegramni uzish",
+                    callback_data="nano:agent:telegram:disconnect",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Orqaga",
+                    callback_data="nano:agent",
+                ),
+            ],
+        ]
+    )
+
+
+def _telegram_disconnected_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Orqaga",
+                    callback_data="nano:agent",
+                ),
+            ],
+        ]
+    )
+
+
+async def _safe_edit_connect(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup,
+) -> None:
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=reply_markup,
+        )
+    except Exception:
+        try:
+            await callback.message.answer(
+                text,
+                reply_markup=reply_markup,
+            )
+        except Exception:
+            logger.exception(
+                "Telegram ulash xabarini yangilab bo'lmadi."
+            )
+
+
+@router.callback_query(F.data == "nano:agent:telegram")
+async def agent_telegram_entry(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    connected = await get_connection_status(telegram_id)
+
+    await callback.answer()
+
+    if connected:
+        await _safe_edit_connect(
+            callback,
+            "📱 <b>Telegram akkaunt</b>\n\n"
+            "✅ Telegram akkauntingiz ulangan.\n\n"
+            "Ulangan akkaunt orqali Nano-Bot avtomatik "
+            "javoblarni boshqarishi mumkin.",
+            _telegram_connected_inline_keyboard(),
+        )
+        return
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await callback.message.answer(
+                "❌ Foydalanuvchi topilmadi.\n\n"
+                "Iltimos, /start buyrug'ini bosing."
+            )
+            return
+
+        db_user_id = user.id
+
+    accepted = await has_accepted_terms(db_user_id)
+
+    if accepted:
+        await _start_phone_prompt(callback.message, state)
+        return
+
+    await _safe_edit_connect(
+        callback,
+        TERMS_GATE_TEXT,
+        _terms_gate_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "nano:agent:telegram:status")
+async def agent_telegram_status(
+    callback: CallbackQuery,
+) -> None:
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    try:
+        connected = await get_connection_status(telegram_id)
+
+        if not connected:
+            await callback.answer()
+
+            await _safe_edit_connect(
+                callback,
+                "❌ Telegram akkaunt ulanmagan.",
+                _telegram_disconnected_inline_keyboard(),
+            )
+            return
+
+        me = await telegram_client_manager.get_me(
+            telegram_id
+        )
+
+        await callback.answer()
+
+        if me:
+            username = (
+                f"@{me.username}"
+                if me.username
+                else "Username yo'q"
+            )
+
+            name = me.first_name or "Telegram"
+
+            await _safe_edit_connect(
+                callback,
+                "📱 <b>Telegram holati</b>\n\n"
+                "🟢 Holat: <b>Ulangan</b>\n"
+                f"👤 Ism: <b>{name}</b>\n"
+                f"🔗 Username: <b>{username}</b>\n"
+                f"🆔 ID: <code>{me.id}</code>",
+                _telegram_connected_inline_keyboard(),
+            )
+            return
+
+        await _safe_edit_connect(
+            callback,
+            "⚠️ Session mavjud, lekin Telegram akkauntiga "
+            "ulanishni tekshirib bo'lmadi.",
+            _telegram_connected_inline_keyboard(),
+        )
+
+    except Exception:
+        logger.exception(
+            "Telegram status xatosi (inline): telegram_id=%s",
+            telegram_id,
+        )
+
+        await callback.answer(
+            "❌ Xatolik yuz berdi.",
+            show_alert=True,
+        )
+
+
+@router.callback_query(F.data == "nano:agent:telegram:disconnect")
+async def agent_telegram_disconnect(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    try:
+        await telegram_client_manager.logout(telegram_id)
+
+        async with AsyncSessionLocal() as session:
+            user = await get_user_by_telegram_id(
+                session,
+                telegram_id,
+            )
+
+            if user:
+                result = await session.execute(
+                    select(TelegramAccount).where(
+                        TelegramAccount.user_id == user.id
+                    )
+                )
+
+                account = result.scalar_one_or_none()
+
+                if account:
+                    account.is_connected = False
+                    account.status = "disconnected"
+
+                    await session.commit()
+
+        await state.clear()
+
+        await callback.answer("🔌 Uzildi.")
+
+        await _safe_edit_connect(
+            callback,
+            "🔌 <b>Telegram uzildi.</b>\n\n"
+            "Telegram akkauntingiz Nano-Botdan uzildi.",
+            _telegram_disconnected_inline_keyboard(),
+        )
+
+    except Exception:
+        logger.exception(
+            "Telegram disconnect xatosi (inline): "
+            "telegram_id=%s",
+            telegram_id,
+        )
+
+        await callback.answer(
+            "❌ Telegram akkauntini uzishda xatolik yuz berdi.",
+            show_alert=True,
+        )
+
+
+# ============================================================
 # EXPORT
 # ============================================================
 

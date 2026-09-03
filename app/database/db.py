@@ -102,6 +102,27 @@ async def run_manual_migrations() -> None:
         "ALTER TABLE first_messages "
         "ADD COLUMN IF NOT EXISTS repeat_interval_seconds "
         "INTEGER NOT NULL DEFAULT 3600",
+        # Bot paroli / inactivity lock (21-bo'lim).
+        # MUHIM: Telegram akkaunt paroli/2FA EMAS — faqat
+        # Nano-Bot'ning o'ziga kirishni himoyalovchi qo'shimcha
+        # parol. Faqat bcrypt hash saqlanadi.
+        "ALTER TABLE user_settings "
+        "ADD COLUMN IF NOT EXISTS password_hash TEXT",
+        "ALTER TABLE user_settings "
+        "ADD COLUMN IF NOT EXISTS password_enabled "
+        "BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE user_settings "
+        "ADD COLUMN IF NOT EXISTS last_activity_at "
+        "TIMESTAMPTZ",
+        "ALTER TABLE user_settings "
+        "ADD COLUMN IF NOT EXISTS authenticated_until "
+        "TIMESTAMPTZ",
+        "ALTER TABLE user_settings "
+        "ADD COLUMN IF NOT EXISTS failed_password_attempts "
+        "INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE user_settings "
+        "ADD COLUMN IF NOT EXISTS password_locked_until "
+        "TIMESTAMPTZ",
     ]
 
     try:

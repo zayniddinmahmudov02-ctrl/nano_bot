@@ -3,13 +3,19 @@ import secrets
 import string
 
 from aiogram import F, Router
-from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
 from app.config import BOT_USERNAME
 from app.database import AsyncSessionLocal
 from app.database.models import Referral
-from app.services.user_service import get_user_by_telegram_id
+from app.keyboards.nano import nano_referrals_keyboard
+from app.services.user_service import (
+    get_user_by_telegram_id,
+    get_user_language,
+)
+from app.texts import t
 
 from ..keyboards.main import main_menu_keyboard
 from ..keyboards.referral import (
@@ -366,6 +372,218 @@ async def referral_back(
     await message.answer(
         "🏠 <b>Bosh menyu</b>",
         reply_markup=main_menu_keyboard(),
+    )
+
+
+# ============================================================
+# INLINE ENTRY POINT (Bosh menyu → 👥 Referallar)
+# ============================================================
+#
+# Mavjud referral business logic (get_or_create_referral,
+# get_referral_level, get_referral_limit) o'zgarishsiz qayta
+# ishlatiladi — faqat taqdim etish (presentation) qatlami
+# inline'ga o'tkazildi.
+
+_LEVEL_BENEFITS = {
+    1: "3 ta Auto Reply",
+    2: "10 ta Auto Reply",
+    3: "20 ta Auto Reply + 2 til",
+    4: "♾ Cheksiz Auto Reply + 3 til",
+}
+
+_LEVEL_THRESHOLDS = {1: "0-9", 2: "10-29", 3: "30-49", 4: "50+"}
+
+
+async def _safe_edit_referral(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup,
+) -> None:
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=reply_markup,
+        )
+    except Exception:
+        try:
+            await callback.message.answer(
+                text,
+                reply_markup=reply_markup,
+            )
+        except Exception:
+            logger.exception(
+                "Referal xabarini yangilab bo'lmadi."
+            )
+
+
+async def _render_referrals_text(
+    telegram_id: int,
+    lang: str,
+) -> str:
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            return t("user_not_found", lang)
+
+        referral = await get_or_create_referral(
+            session,
+            user.id,
+        )
+
+        await session.commit()
+
+        code = referral.referral_code
+        count = referral.referral_count
+
+    bot_username = BOT_USERNAME.lstrip("@")
+    link = f"https://t.me/{bot_username}?start=ref_{code}"
+
+    current_level = get_referral_level(count)
+
+    level_lines = "\n".join(
+        (
+            f"{'👉 ' if level == current_level else ''}"
+            f"{level}-daraja "
+            f"({_LEVEL_THRESHOLDS[level]} referral): "
+            f"{_LEVEL_BENEFITS[level]}"
+        )
+        for level in (1, 2, 3, 4)
+    )
+
+    return (
+        f"{t('referrals_title', lang)}\n\n"
+        f"🔗 Sizning referal havolangiz:\n"
+        f"<code>{link}</code>\n\n"
+        f"👤 Taklif qilinganlar: <b>{count}</b>\n\n"
+        f"🏆 <b>Darajalar:</b>\n{level_lines}\n\n"
+        "🎁 <b>Bonuslar:</b>\n"
+        "Har bir taklif qilingan foydalanuvchi Auto Reply "
+        "limitingizni oshiradi."
+    )
+
+
+@router.callback_query(F.data == "nano:referrals")
+async def nano_referrals_menu(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        lang = await get_user_language(session, telegram_id)
+
+    text = await _render_referrals_text(telegram_id, lang)
+
+    await callback.answer()
+
+    await _safe_edit_referral(
+        callback,
+        text,
+        nano_referrals_keyboard(lang),
+    )
+
+
+@router.callback_query(F.data == "nano:referrals:share")
+async def nano_referrals_share(
+    callback: CallbackQuery,
+) -> None:
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        lang = await get_user_language(session, telegram_id)
+
+    text = await _render_referrals_text(telegram_id, lang)
+
+    await callback.answer(
+        "🔗 Havolangiz quyida — do'stlaringizga yuboring."
+    )
+
+    await _safe_edit_referral(
+        callback,
+        text,
+        nano_referrals_keyboard(lang),
+    )
+
+
+@router.callback_query(F.data == "nano:referrals:stats")
+async def nano_referrals_stats(
+    callback: CallbackQuery,
+) -> None:
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        lang = await get_user_language(session, telegram_id)
+
+        if user is None:
+            await callback.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                show_alert=True,
+            )
+            return
+
+        referral = await get_or_create_referral(
+            session,
+            user.id,
+        )
+
+        await session.commit()
+
+        count = referral.referral_count
+
+    level = get_referral_level(count)
+
+    if count < 10:
+        next_level = 10
+    elif count < 30:
+        next_level = 30
+    elif count < 50:
+        next_level = 50
+    else:
+        next_level = None
+
+    if next_level is None:
+        progress = "🏆 Maksimal daraja!"
+    else:
+        remaining = next_level - count
+        progress = (
+            f"🎯 Keyingi darajagacha: <b>{remaining}</b> ta "
+            "referral"
+        )
+
+    await callback.answer()
+
+    await _safe_edit_referral(
+        callback,
+        f"📊 <b>Referal statistikasi</b>\n\n"
+        f"👥 Jami referallar: <b>{count}</b>\n"
+        f"🏆 Daraja: <b>{level}</b>\n"
+        f"📌 Avto javob limiti: "
+        f"<b>{get_referral_limit(count)}</b>\n\n"
+        f"{progress}",
+        nano_referrals_keyboard(lang),
     )
 
 

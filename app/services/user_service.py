@@ -135,10 +135,66 @@ async def get_connected_telegram_account(
     return result.scalar_one_or_none()
 
 
+async def get_or_create_user_settings(
+    session: AsyncSession,
+    user_id: int,
+) -> UserSettings:
+    """
+    users.id bo'yicha UserSettings qatorini topadi yoki
+    yaratadi. Bot paroli, til va boshqa shaxsiy sozlamalar
+    shu qatorda saqlanadi.
+    """
+
+    result = await session.execute(
+        select(UserSettings).where(
+            UserSettings.user_id == user_id
+        )
+    )
+
+    settings = result.scalar_one_or_none()
+
+    if settings is None:
+        settings = UserSettings(
+            user_id=user_id,
+            language="uz",
+            notifications_enabled=True,
+        )
+
+        session.add(settings)
+        await session.flush()
+
+    return settings
+
+
+async def get_user_language(
+    session: AsyncSession,
+    telegram_id: int,
+) -> str:
+    """
+    Foydalanuvchining tanlangan tilini qaytaradi.
+
+    Foydalanuvchi topilmasa yoki til belgilanmagan bo'lsa,
+    standart ("uz") qaytariladi — hech qachon xatolik
+    ko'tarmaydi.
+    """
+
+    user = await get_user_by_telegram_id(
+        session=session,
+        telegram_id=telegram_id,
+    )
+
+    if user is None or not user.language:
+        return "uz"
+
+    return user.language
+
+
 __all__ = [
     "get_user_by_telegram_id",
     "get_or_create_user",
     "get_user_id_by_telegram_id",
     "ensure_user",
     "get_connected_telegram_account",
+    "get_or_create_user_settings",
+    "get_user_language",
 ]

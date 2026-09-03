@@ -20,6 +20,10 @@ from app.services.telegram_event_filters import (
     is_private_incoming_event,
     validate_private_user_event,
 )
+from app.services.user_stats_service import (
+    FIRST_MESSAGE_EVENT,
+    record_statistics_event,
+)
 from app.telegram.user_client import telegram_client_manager
 
 logger = logging.getLogger(__name__)
@@ -154,6 +158,14 @@ class FirstMessageEngine:
                     session.add(statistics)
 
                 statistics.first_messages_sent += 1
+
+                # "Bugun/7 kun/30 kun" statistikasi uchun
+                # yengil hodisa yozuvi (xabar mazmuni emas).
+                await record_statistics_event(
+                    session,
+                    db_user_id,
+                    FIRST_MESSAGE_EVENT,
+                )
 
                 await session.commit()
 

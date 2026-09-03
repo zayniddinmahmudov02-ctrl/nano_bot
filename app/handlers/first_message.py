@@ -3,16 +3,19 @@ import logging
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-)
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.database.models import FirstMessage
+from app.keyboards.first_message import (
+    INTERVAL_LABELS,
+    first_message_card_keyboard,
+    first_message_delete_confirm_keyboard,
+    first_message_empty_keyboard,
+    first_message_input_cancel_keyboard,
+    first_message_interval_keyboard,
+)
 from app.keyboards.main import main_menu_keyboard
 from app.services.media_service import (
     detect_post_content,
@@ -32,70 +35,83 @@ router = Router()
 INTERVAL_HOUR = 3600
 INTERVAL_DAY = 86400
 
-INTERVAL_LABELS = {
-    INTERVAL_HOUR: "⏱ Har 1 soatdan keyin",
-    INTERVAL_DAY: "📅 Har 1 kundan keyin",
-}
-
 
 class FirstMessageStates(StatesGroup):
     waiting_message = State()
     waiting_edit_message = State()
 
 
-def first_message_keyboard():
-    """
-    First message menyusi.
-    """
+# ============================================================
+# RENDER HELPERS
+# ============================================================
 
-    from aiogram.types import ReplyKeyboardMarkup
-    from aiogram.utils.keyboard import ReplyKeyboardBuilder
+def _interval_label(seconds: int) -> str:
+    return INTERVAL_LABELS.get(seconds, f"{seconds} soniya")
 
-    builder = ReplyKeyboardBuilder()
 
-    builder.button(text="➕ Birinchi xabar yaratish")
-    builder.button(text="✏️ Birinchi xabarni o‘zgartirish")
-    builder.button(text="⏱ Qayta yuborish vaqti")
-    builder.button(text="🗑 Birinchi xabarni o‘chirish")
-    builder.button(text="🔄 Yoqish / O‘chirish")
-    builder.button(text="📋 Birinchi xabar holati")
-    builder.button(text="🏠 Bosh menyu")
+def _render_card_text(first_message: FirstMessage) -> str:
+    status = (
+        "🟢 Faol" if first_message.active else "🔴 O‘chirilgan"
+    )
 
-    builder.adjust(2, 2, 1, 1, 1)
+    preview = (
+        first_message.text
+        if first_message.text
+        else f"[{first_message.message_type} saqlangan]"
+    )
 
-    return builder.as_markup(
-        resize_keyboard=True,
-        is_persistent=True,
+    if len(preview) > 300:
+        preview = preview[:300] + "…"
+
+    return (
+        "1️⃣ <b>Birinchi xabar</b>\n\n"
+        f"{status}\n"
+        f"📦 Tur: <code>{first_message.message_type}</code>\n"
+        f"🔁 Qayta yuborish: "
+        f"<b>{_interval_label(first_message.repeat_interval_seconds)}</b>"
+        "\n\n"
+        f"📨 <b>Xabar:</b>\n{preview}"
     )
 
 
-def first_message_interval_inline_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=INTERVAL_LABELS[INTERVAL_HOUR],
-                    callback_data=f"fm_interval:{INTERVAL_HOUR}",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=INTERVAL_LABELS[INTERVAL_DAY],
-                    callback_data=f"fm_interval:{INTERVAL_DAY}",
-                ),
-            ],
-        ]
-    )
+async def _safe_edit(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup,
+) -> None:
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=reply_markup,
+        )
+    except Exception:
+        try:
+            await callback.message.answer(
+                text,
+                reply_markup=reply_markup,
+            )
+        except Exception:
+            logger.exception(
+                "First Message xabarini yangilab bo'lmadi."
+            )
 
 
-@router.message(F.text == "1️⃣ Birinchi xabar")
-async def first_message_menu(
-    message: Message,
+# ============================================================
+# MAIN CARD
+# ============================================================
+
+@router.callback_query(F.data == "nano:agent:first")
+async def first_message_card(
+    callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
     await state.clear()
 
-    telegram_id = int(message.from_user.id)
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
 
     async with AsyncSessionLocal() as session:
         user = await get_user_by_telegram_id(
@@ -104,10 +120,9 @@ async def first_message_menu(
         )
 
         if user is None:
-            await message.answer(
-                "❌ Foydalanuvchi topilmadi.\n\n"
-                "Iltimos, /start buyrug‘ini bosing.",
-                reply_markup=main_menu_keyboard(),
+            await callback.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                show_alert=True,
             )
             return
 
@@ -119,38 +134,23 @@ async def first_message_menu(
 
         first_message = result.scalar_one_or_none()
 
+    await callback.answer()
+
     if first_message is None:
-        await message.answer(
+        await _safe_edit(
+            callback,
             "1️⃣ <b>Birinchi xabar</b>\n\n"
-            "Sizda hozircha birinchi xabar "
-            "sozlanmagan.\n\n"
-            "Yangi xabar yarating. U sizga "
-            "birinchi marta yozgan foydalanuvchiga "
-            "yuboriladi.",
-            reply_markup=first_message_keyboard(),
+            "Sizda hozircha birinchi xabar sozlanmagan.\n\n"
+            "Yangi xabar yarating — u sizga birinchi marta "
+            "yozgan foydalanuvchiga avtomatik yuboriladi.",
+            first_message_empty_keyboard(),
         )
         return
 
-    status = (
-        "🟢 Faol"
-        if first_message.active
-        else "🔴 O‘chiq"
-    )
-
-    interval_label = INTERVAL_LABELS.get(
-        first_message.repeat_interval_seconds,
-        f"{first_message.repeat_interval_seconds} soniya",
-    )
-
-    await message.answer(
-        "1️⃣ <b>Birinchi xabar</b>\n\n"
-        f"📦 Tur: <code>{first_message.message_type}</code>\n"
-        f"📊 Holat: <b>{status}</b>\n"
-        f"🔁 Qayta yuborish: <b>{interval_label}</b>\n\n"
-        "Birinchi marta yozgan foydalanuvchiga "
-        "avtomatik yuboriladigan xabarni "
-        "boshqarishingiz mumkin.",
-        reply_markup=first_message_keyboard(),
+    await _safe_edit(
+        callback,
+        _render_card_text(first_message),
+        first_message_card_keyboard(first_message.active),
     )
 
 
@@ -158,12 +158,16 @@ async def first_message_menu(
 # CREATE
 # ============================================================
 
-@router.message(F.text == "➕ Birinchi xabar yaratish")
-async def create_first_message_start(
-    message: Message,
+@router.callback_query(F.data == "nano:agent:first:create")
+async def first_message_create_start(
+    callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
-    telegram_id = int(message.from_user.id)
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
 
     async with AsyncSessionLocal() as session:
         user = await get_user_by_telegram_id(
@@ -172,9 +176,9 @@ async def create_first_message_start(
         )
 
         if user is None:
-            await message.answer(
+            await callback.answer(
                 "❌ Foydalanuvchi topilmadi.",
-                reply_markup=main_menu_keyboard(),
+                show_alert=True,
             )
             return
 
@@ -184,11 +188,9 @@ async def create_first_message_start(
         )
 
         if account is None:
-            await message.answer(
-                "❌ Birinchi xabardan foydalanish uchun "
-                "avval Telegram akkauntingizni ulang.\n\n"
-                "📱 «Telegram ulash» bo‘limiga kiring.",
-                reply_markup=main_menu_keyboard(),
+            await callback.answer(
+                "❌ Avval Telegram akkauntingizni ulang.",
+                show_alert=True,
             )
             return
 
@@ -201,58 +203,58 @@ async def create_first_message_start(
         existing = result.scalar_one_or_none()
 
     if existing:
-        await message.answer(
-            "⚠️ Sizda allaqachon birinchi xabar mavjud.\n\n"
-            "Uni yangi xabar bilan almashtirish uchun "
-            "✏️ <b>Birinchi xabarni o‘zgartirish</b> "
-            "tugmasidan foydalaning.",
-            reply_markup=first_message_keyboard(),
+        await callback.answer(
+            "⚠️ Birinchi xabar allaqachon mavjud.",
+            show_alert=True,
         )
         return
 
-    await state.clear()
-    await state.set_state(
-        FirstMessageStates.waiting_message
+    await state.set_state(FirstMessageStates.waiting_message)
+
+    await state.update_data(
+        fm_chat_id=callback.message.chat.id,
+        fm_message_id=callback.message.message_id,
     )
 
-    await message.answer(
+    await callback.answer()
+
+    await _safe_edit(
+        callback,
         "📩 <b>Birinchi xabarni yuboring</b>\n\n"
         "Matn, rasm, video yoki hujjat yuborishingiz mumkin.\n\n"
-        "Bu xabar sizning Telegram akkauntingizga "
-        "birinchi marta yozgan foydalanuvchiga yuboriladi.\n\n"
+        "Bu xabar sizning Telegram akkauntingizga birinchi "
+        "marta yozgan foydalanuvchiga yuboriladi.\n\n"
         "⚠️ <b>Eslatma:</b>\n"
         "Post alohida Nano-Bot Storage kanalida saqlanadi va "
         "kerak bo‘lganda shu kanal orqali yuboriladi.\n\n"
         "❗ Iltimos, konfiguratsiya jarayonidagi xabarlarni "
-        "o‘chirmang.\n\n"
-        "Bekor qilish uchun:\n"
-        "❌ Bekor qilish"
+        "o‘chirmang.",
+        first_message_input_cancel_keyboard(),
     )
 
 
-@router.message(
-    FirstMessageStates.waiting_message,
-    F.text == "❌ Bekor qilish",
-)
-async def cancel_create_first_message(
-    message: Message,
+@router.callback_query(F.data == "nano:agent:first:cancel")
+async def first_message_cancel_input(
+    callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
     await state.clear()
 
-    await message.answer(
-        "❌ Birinchi xabar yaratish bekor qilindi.",
-        reply_markup=first_message_keyboard(),
-    )
+    await callback.answer("❌ Bekor qilindi.")
+
+    await first_message_card(callback, state)
 
 
-@router.message(
-    FirstMessageStates.waiting_message,
-)
+@router.message(FirstMessageStates.waiting_message)
 async def receive_first_message(
     message: Message,
     state: FSMContext,
 ) -> None:
+    data = await state.get_data()
+
+    fm_chat_id = data.get("fm_chat_id")
+    fm_message_id = data.get("fm_message_id")
+
     message_type, text, file_id, file_name = (
         detect_post_content(message)
     )
@@ -290,9 +292,7 @@ async def receive_first_message(
             await state.clear()
 
             await message.answer(
-                "❌ Avval Telegram akkauntingizni ulang.\n\n"
-                "📱 «Telegram ulash» bo‘limiga kiring.",
-                reply_markup=main_menu_keyboard(),
+                "❌ Avval Telegram akkauntingizni ulang."
             )
             return
 
@@ -308,8 +308,7 @@ async def receive_first_message(
             await state.clear()
 
             await message.answer(
-                "⚠️ Birinchi xabar allaqachon mavjud.",
-                reply_markup=first_message_keyboard(),
+                "⚠️ Birinchi xabar allaqachon mavjud."
             )
             return
 
@@ -325,8 +324,7 @@ async def receive_first_message(
     if storage_channel is None:
         await message.answer(
             "❌ Storage kanalni tayyorlashda xatolik yuz berdi.\n\n"
-            "Birozdan keyin qayta urinib ko‘ring yoki Telegram "
-            "akkauntingizni qayta ulang."
+            "Birozdan keyin qayta urinib ko‘ring."
         )
         return
 
@@ -336,8 +334,7 @@ async def receive_first_message(
 
     if telethon_client is None:
         await message.answer(
-            "❌ Telegram akkaunt ulanishi topilmadi.\n\n"
-            "Iltimos, akkauntingizni qayta ulang."
+            "❌ Telegram akkaunt ulanishi topilmadi."
         )
         return
 
@@ -385,8 +382,7 @@ async def receive_first_message(
             await state.clear()
 
             await message.answer(
-                "⚠️ Birinchi xabar allaqachon mavjud.",
-                reply_markup=first_message_keyboard(),
+                "⚠️ Birinchi xabar allaqachon mavjud."
             )
             return
 
@@ -404,33 +400,45 @@ async def receive_first_message(
         session.add(first_message)
 
         await session.commit()
+        await session.refresh(first_message)
+
+        card_text = _render_card_text(first_message)
+        is_active = first_message.active
 
     await state.clear()
 
-    await message.answer(
-        "✅ <b>Birinchi xabar yaratildi!</b>\n\n"
-        f"📦 Tur: <code>{message_type}</code>\n"
-        "🟢 Holat: <b>Faol</b>\n"
-        f"🔁 Qayta yuborish: "
-        f"<b>{INTERVAL_LABELS[INTERVAL_HOUR]}</b>\n\n"
-        "Endi birinchi marta yozgan foydalanuvchilarga "
-        "ushbu xabar yuboriladi.\n\n"
-        "⏱ Qayta yuborish vaqtini o‘zgartirish uchun "
-        "«⏱ Qayta yuborish vaqti» tugmasidan foydalaning.",
-        reply_markup=first_message_keyboard(),
-    )
+    await message.answer("✅ Birinchi xabar yaratildi!")
+
+    if fm_chat_id and fm_message_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=fm_chat_id,
+                message_id=fm_message_id,
+                text=card_text,
+                reply_markup=first_message_card_keyboard(
+                    is_active
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "First Message kartasini yangilab bo'lmadi."
+            )
 
 
 # ============================================================
 # EDIT
 # ============================================================
 
-@router.message(F.text == "✏️ Birinchi xabarni o‘zgartirish")
-async def edit_first_message_start(
-    message: Message,
+@router.callback_query(F.data == "nano:agent:first:edit")
+async def first_message_edit_start(
+    callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
-    telegram_id = int(message.from_user.id)
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
 
     async with AsyncSessionLocal() as session:
         user = await get_user_by_telegram_id(
@@ -439,9 +447,9 @@ async def edit_first_message_start(
         )
 
         if user is None:
-            await message.answer(
+            await callback.answer(
                 "❌ Foydalanuvchi topilmadi.",
-                reply_markup=main_menu_keyboard(),
+                show_alert=True,
             )
             return
 
@@ -454,49 +462,42 @@ async def edit_first_message_start(
         existing = result.scalar_one_or_none()
 
     if existing is None:
-        await message.answer(
+        await callback.answer(
             "❌ Birinchi xabar hali yaratilmagan.",
-            reply_markup=first_message_keyboard(),
+            show_alert=True,
         )
         return
 
-    await state.clear()
     await state.set_state(
         FirstMessageStates.waiting_edit_message
     )
 
-    await message.answer(
+    await state.update_data(
+        fm_chat_id=callback.message.chat.id,
+        fm_message_id=callback.message.message_id,
+    )
+
+    await callback.answer()
+
+    await _safe_edit(
+        callback,
         "✏️ <b>Yangi birinchi xabarni yuboring.</b>\n\n"
         "Eski xabar yangi xabar bilan almashtiriladi.\n\n"
-        "Matn, rasm, video yoki hujjat yuborishingiz mumkin.\n\n"
-        "Bekor qilish:\n"
-        "❌ Bekor qilish"
+        "Matn, rasm, video yoki hujjat yuborishingiz mumkin.",
+        first_message_input_cancel_keyboard(),
     )
 
 
-@router.message(
-    FirstMessageStates.waiting_edit_message,
-    F.text == "❌ Bekor qilish",
-)
-async def cancel_edit_first_message(
-    message: Message,
-    state: FSMContext,
-) -> None:
-    await state.clear()
-
-    await message.answer(
-        "❌ O‘zgartirish bekor qilindi.",
-        reply_markup=first_message_keyboard(),
-    )
-
-
-@router.message(
-    FirstMessageStates.waiting_edit_message,
-)
+@router.message(FirstMessageStates.waiting_edit_message)
 async def receive_edit_first_message(
     message: Message,
     state: FSMContext,
 ) -> None:
+    data = await state.get_data()
+
+    fm_chat_id = data.get("fm_chat_id")
+    fm_message_id = data.get("fm_message_id")
+
     message_type, text, file_id, file_name = (
         detect_post_content(message)
     )
@@ -534,9 +535,7 @@ async def receive_edit_first_message(
             await state.clear()
 
             await message.answer(
-                "❌ Avval Telegram akkauntingizni ulang.\n\n"
-                "📱 «Telegram ulash» bo‘limiga kiring.",
-                reply_markup=main_menu_keyboard(),
+                "❌ Avval Telegram akkauntingizni ulang."
             )
             return
 
@@ -552,8 +551,7 @@ async def receive_edit_first_message(
             await state.clear()
 
             await message.answer(
-                "❌ Birinchi xabar topilmadi.",
-                reply_markup=first_message_keyboard(),
+                "❌ Birinchi xabar topilmadi."
             )
             return
 
@@ -568,9 +566,7 @@ async def receive_edit_first_message(
 
     if storage_channel is None:
         await message.answer(
-            "❌ Storage kanalni tayyorlashda xatolik yuz berdi.\n\n"
-            "Birozdan keyin qayta urinib ko‘ring yoki Telegram "
-            "akkauntingizni qayta ulang."
+            "❌ Storage kanalni tayyorlashda xatolik yuz berdi."
         )
         return
 
@@ -580,8 +576,7 @@ async def receive_edit_first_message(
 
     if telethon_client is None:
         await message.answer(
-            "❌ Telegram akkaunt ulanishi topilmadi.\n\n"
-            "Iltimos, akkauntingizni qayta ulang."
+            "❌ Telegram akkaunt ulanishi topilmadi."
         )
         return
 
@@ -629,8 +624,7 @@ async def receive_edit_first_message(
             await state.clear()
 
             await message.answer(
-                "❌ Birinchi xabar topilmadi.",
-                reply_markup=first_message_keyboard(),
+                "❌ Birinchi xabar topilmadi."
             )
             return
 
@@ -643,27 +637,45 @@ async def receive_edit_first_message(
 
         await session.commit()
 
+        card_text = _render_card_text(first_message)
+        is_active = first_message.active
+
     await state.clear()
 
-    await message.answer(
-        "✅ <b>Birinchi xabar yangilandi!</b>\n\n"
-        f"📦 Tur: <code>{message_type}</code>",
-        reply_markup=first_message_keyboard(),
-    )
+    await message.answer("✅ Birinchi xabar yangilandi!")
+
+    if fm_chat_id and fm_message_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=fm_chat_id,
+                message_id=fm_message_id,
+                text=card_text,
+                reply_markup=first_message_card_keyboard(
+                    is_active
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "First Message kartasini yangilab bo'lmadi."
+            )
 
 
 # ============================================================
 # INTERVAL
 # ============================================================
 
-@router.message(F.text == "⏱ Qayta yuborish vaqti")
+@router.callback_query(F.data == "nano:agent:first:interval")
 async def first_message_interval_menu(
-    message: Message,
+    callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
     await state.clear()
 
-    telegram_id = int(message.from_user.id)
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
 
     async with AsyncSessionLocal() as session:
         user = await get_user_by_telegram_id(
@@ -672,9 +684,9 @@ async def first_message_interval_menu(
         )
 
         if user is None:
-            await message.answer(
+            await callback.answer(
                 "❌ Foydalanuvchi topilmadi.",
-                reply_markup=main_menu_keyboard(),
+                show_alert=True,
             )
             return
 
@@ -687,38 +699,39 @@ async def first_message_interval_menu(
         first_message = result.scalar_one_or_none()
 
     if first_message is None:
-        await message.answer(
+        await callback.answer(
             "❌ Avval birinchi xabar yarating.",
-            reply_markup=first_message_keyboard(),
+            show_alert=True,
         )
         return
 
-    current_label = INTERVAL_LABELS.get(
-        first_message.repeat_interval_seconds,
-        f"{first_message.repeat_interval_seconds} soniya",
+    await callback.answer()
+
+    current_label = _interval_label(
+        first_message.repeat_interval_seconds
     )
 
-    await message.answer(
+    await _safe_edit(
+        callback,
         "⏱ <b>Qayta yuborish vaqti</b>\n\n"
         f"Hozirgi tanlov: <b>{current_label}</b>\n\n"
-        "Birinchi xabar bir kontaktga qachon qayta "
-        "yuborilishini tanlang:",
-        reply_markup=first_message_interval_inline_keyboard(),
+        "Bir kontaktga qachon qayta yuborilishini tanlang:",
+        first_message_interval_keyboard(),
     )
 
 
-@router.callback_query(F.data.startswith("fm_interval:"))
+@router.callback_query(
+    F.data.startswith("nano:agent:first:interval:set:")
+)
 async def set_first_message_interval(
     callback: CallbackQuery,
 ) -> None:
-    if callback.from_user is None or callback.data is None:
+    if callback.from_user is None:
         await callback.answer()
         return
 
     try:
-        interval_seconds = int(
-            callback.data.split(":", 1)[1]
-        )
+        interval_seconds = int(callback.data.split(":")[-1])
     except (IndexError, ValueError):
         await callback.answer(
             "❌ Noto‘g‘ri tanlov.",
@@ -769,31 +782,89 @@ async def set_first_message_interval(
 
     label = INTERVAL_LABELS[interval_seconds]
 
-    if callback.message is not None:
-        try:
-            await callback.message.edit_text(
-                "⏱ <b>Qayta yuborish vaqti</b>\n\n"
-                f"✅ Saqlandi: <b>{label}</b>",
-                reply_markup=first_message_interval_inline_keyboard(),
-            )
-        except Exception:
-            pass
-
     await callback.answer("✅ Saqlandi")
+
+    await _safe_edit(
+        callback,
+        "⏱ <b>Qayta yuborish vaqti</b>\n\n"
+        f"✅ Saqlandi: <b>{label}</b>",
+        first_message_interval_keyboard(),
+    )
+
+
+# ============================================================
+# TOGGLE
+# ============================================================
+
+@router.callback_query(F.data == "nano:agent:first:toggle")
+async def toggle_first_message(
+    callback: CallbackQuery,
+) -> None:
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await callback.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                show_alert=True,
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        first_message = result.scalar_one_or_none()
+
+        if first_message is None:
+            await callback.answer(
+                "❌ Avval birinchi xabar yarating.",
+                show_alert=True,
+            )
+            return
+
+        first_message.active = not first_message.active
+
+        await session.commit()
+
+        card_text = _render_card_text(first_message)
+        is_active = first_message.active
+
+    await callback.answer(
+        "🟢 Yoqildi." if is_active else "🔴 O‘chirildi."
+    )
+
+    await _safe_edit(
+        callback,
+        card_text,
+        first_message_card_keyboard(is_active),
+    )
 
 
 # ============================================================
 # DELETE
 # ============================================================
 
-@router.message(F.text == "🗑 Birinchi xabarni o‘chirish")
-async def delete_first_message(
-    message: Message,
-    state: FSMContext,
+@router.callback_query(F.data == "nano:agent:first:delete:ask")
+async def first_message_delete_ask(
+    callback: CallbackQuery,
 ) -> None:
-    await state.clear()
+    if callback.from_user is None:
+        await callback.answer()
+        return
 
-    telegram_id = int(message.from_user.id)
+    telegram_id = int(callback.from_user.id)
 
     async with AsyncSessionLocal() as session:
         user = await get_user_by_telegram_id(
@@ -802,111 +873,9 @@ async def delete_first_message(
         )
 
         if user is None:
-            await message.answer(
+            await callback.answer(
                 "❌ Foydalanuvchi topilmadi.",
-                reply_markup=main_menu_keyboard(),
-            )
-            return
-
-        result = await session.execute(
-            select(FirstMessage).where(
-                FirstMessage.user_id == user.id
-            )
-        )
-
-        first_message = result.scalar_one_or_none()
-
-        if first_message is None:
-            await message.answer(
-                "ℹ️ O‘chirish uchun birinchi xabar mavjud emas.",
-                reply_markup=first_message_keyboard(),
-            )
-            return
-
-        await session.delete(first_message)
-        await session.commit()
-
-    await message.answer(
-        "🗑 <b>Birinchi xabar o‘chirildi.</b>",
-        reply_markup=first_message_keyboard(),
-    )
-
-
-@router.message(F.text == "🔄 Yoqish / O‘chirish")
-async def toggle_first_message(
-    message: Message,
-    state: FSMContext,
-) -> None:
-    await state.clear()
-
-    telegram_id = int(message.from_user.id)
-
-    async with AsyncSessionLocal() as session:
-        user = await get_user_by_telegram_id(
-            session,
-            telegram_id,
-        )
-
-        if user is None:
-            await message.answer(
-                "❌ Foydalanuvchi topilmadi.",
-                reply_markup=main_menu_keyboard(),
-            )
-            return
-
-        result = await session.execute(
-            select(FirstMessage).where(
-                FirstMessage.user_id == user.id
-            )
-        )
-
-        first_message = result.scalar_one_or_none()
-
-        if first_message is None:
-            await message.answer(
-                "❌ Avval birinchi xabar yarating.",
-                reply_markup=first_message_keyboard(),
-            )
-            return
-
-        first_message.active = (
-            not first_message.active
-        )
-
-        await session.commit()
-
-        status = (
-            "🟢 Faol"
-            if first_message.active
-            else "🔴 O‘chiq"
-        )
-
-    await message.answer(
-        "🔄 <b>Birinchi xabar holati o‘zgartirildi.</b>\n\n"
-        f"📊 Holat: <b>{status}</b>",
-        reply_markup=first_message_keyboard(),
-    )
-
-
-@router.message(F.text == "📋 Birinchi xabar holati")
-async def first_message_status(
-    message: Message,
-    state: FSMContext,
-) -> None:
-    await state.clear()
-
-    telegram_id = int(message.from_user.id)
-
-    async with AsyncSessionLocal() as session:
-        user = await get_user_by_telegram_id(
-            session,
-            telegram_id,
-        )
-
-        if user is None:
-            await message.answer(
-                "❌ Foydalanuvchi topilmadi.",
-                reply_markup=main_menu_keyboard(),
+                show_alert=True,
             )
             return
 
@@ -919,58 +888,93 @@ async def first_message_status(
         first_message = result.scalar_one_or_none()
 
     if first_message is None:
-        await message.answer(
-            "❌ Birinchi xabar sozlanmagan.",
-            reply_markup=first_message_keyboard(),
+        await callback.answer(
+            "❌ Birinchi xabar topilmadi.",
+            show_alert=True,
         )
         return
 
-    status = (
-        "🟢 Faol"
-        if first_message.active
-        else "🔴 O‘chiq"
-    )
+    await callback.answer()
 
-    interval_label = INTERVAL_LABELS.get(
-        first_message.repeat_interval_seconds,
-        f"{first_message.repeat_interval_seconds} soniya",
-    )
-
-    preview = (
-        first_message.text
-        if first_message.text
-        else f"[{first_message.message_type}]"
-    )
-
-    if len(preview) > 300:
-        preview = preview[:300] + "..."
-
-    await message.answer(
-        "📋 <b>Birinchi xabar holati</b>\n\n"
-        f"📊 Holat: <b>{status}</b>\n"
-        f"📦 Tur: <code>{first_message.message_type}</code>\n"
-        f"🔁 Qayta yuborish: <b>{interval_label}</b>\n\n"
-        "📝 Xabar:\n"
-        f"<code>{preview}</code>",
-        reply_markup=first_message_keyboard(),
+    await _safe_edit(
+        callback,
+        "⚠️ Birinchi xabarni o‘chirishni xohlaysizmi?",
+        first_message_delete_confirm_keyboard(),
     )
 
 
-@router.message(F.text == "🏠 Bosh menyu")
-async def first_message_back(
-    message: Message,
+@router.callback_query(F.data == "nano:agent:first:delete:no")
+async def first_message_delete_no(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    await callback.answer("❌ Bekor qilindi.")
+
+    await first_message_card(callback, state)
+
+
+@router.callback_query(F.data == "nano:agent:first:delete:yes")
+async def first_message_delete_yes(
+    callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
     await state.clear()
 
-    await message.answer(
-        "🏠 <b>Bosh menyu</b>",
-        reply_markup=main_menu_keyboard(),
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await callback.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                show_alert=True,
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        first_message = result.scalar_one_or_none()
+
+        if first_message is None:
+            await callback.answer(
+                "❌ Birinchi xabar topilmadi.",
+                show_alert=True,
+            )
+            return
+
+        await session.delete(first_message)
+        await session.commit()
+
+    logger.info(
+        "First message deleted: telegram_id=%s",
+        telegram_id,
+    )
+
+    await callback.answer("🗑 O‘chirildi.")
+
+    await _safe_edit(
+        callback,
+        "1️⃣ <b>Birinchi xabar</b>\n\n"
+        "Sizda hozircha birinchi xabar sozlanmagan.\n\n"
+        "Yangi xabar yarating — u sizga birinchi marta "
+        "yozgan foydalanuvchiga avtomatik yuboriladi.",
+        first_message_empty_keyboard(),
     )
 
 
 __all__ = [
     "router",
     "FirstMessageStates",
-    "first_message_keyboard",
 ]

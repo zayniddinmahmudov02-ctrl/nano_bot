@@ -3,7 +3,7 @@ from typing import Optional
 
 from aiogram import Router
 from aiogram.filters import CommandObject, CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardRemove
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
@@ -14,8 +14,12 @@ from app.database.models import (
     User,
     UserSettings,
 )
-from app.keyboards.main import main_menu_keyboard
-from app.services.user_service import get_or_create_user
+from app.keyboards.nano import nano_main_menu_keyboard
+from app.services.user_service import (
+    get_or_create_user,
+    get_user_language,
+)
+from app.texts import t
 
 logger = logging.getLogger(__name__)
 
@@ -221,15 +225,28 @@ async def process_start(
                 )
 
         # -------------------------------------------------
-        # MAIN MENU
+        # MAIN MENU (yangi — to'liq INLINE navigatsiya)
         # -------------------------------------------------
 
+        async with AsyncSessionLocal() as session:
+            lang = await get_user_language(
+                session,
+                telegram_user.id,
+            )
+
+        # Eski persistent ReplyKeyboard endi navigatsiya
+        # uchun ishlatilmaydi — uni tozalaymiz, so'ng yangi
+        # inline Bosh menyuni ko'rsatamiz.
         await message.answer(
             "👋 <b>Nano-Bot</b>ga xush kelibsiz!\n\n"
             "🤖 Shaxsiy Telegram akkauntingiz uchun "
-            "avtomatlashtirish imkoniyatlaridan foydalaning.\n\n"
-            "Quyidagi menyudan kerakli bo‘limni tanlang:",
-            reply_markup=main_menu_keyboard(),
+            "avtomatlashtirish imkoniyatlaridan foydalaning.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+
+        await message.answer(
+            t("main_menu_title", lang),
+            reply_markup=nano_main_menu_keyboard(lang),
         )
 
     except Exception:

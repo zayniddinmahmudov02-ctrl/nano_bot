@@ -13,6 +13,10 @@ from app.database.models import (
     User,
 )
 from app.services.media_service import send_stored_post
+from app.services.user_stats_service import (
+    AUTO_REPLY_EVENT,
+    record_statistics_event,
+)
 from app.services.telegram_event_filters import (
     is_private_incoming_event,
     validate_private_user_event,
@@ -272,6 +276,14 @@ class AutoReplyEngine:
                     session.add(statistics)
 
                 statistics.auto_replies += 1
+
+                # "Bugun/7 kun/30 kun" statistikasi uchun
+                # yengil hodisa yozuvi (xabar mazmuni emas).
+                await record_statistics_event(
+                    session,
+                    db_user_id,
+                    AUTO_REPLY_EVENT,
+                )
 
                 await session.commit()
 

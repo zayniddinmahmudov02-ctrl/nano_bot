@@ -83,6 +83,19 @@ def auto_reply_list_inline_keyboard(
         for index, auto_reply_id in indexed_ids
     ]
 
+    # Reply-keyboard orqali navigatsiya olib tashlangani sababli
+    # (yangi yagona inline navigatsiya standarti), ro'yxat
+    # ekranida ham "orqaga" tugmasi bo'lishi shart — Nano-Agent
+    # menyusiga qaytaradi.
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="⬅️ Orqaga",
+                callback_data="nano:agent",
+            ),
+        ]
+    )
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

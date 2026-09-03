@@ -6,6 +6,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import ErrorEvent
 
 from app.config import BOT_TOKEN, LOG_LEVEL
 from app.database.db import (
@@ -16,17 +17,22 @@ from app.database.db import (
 )
 from app.handlers import (
     start_router,
+    main_router,
+    password_lock_router,
     telegram_connect_router,
+    agent_router,
     auto_replies_router,
     first_message_router,
+    assistant_router,
     referrals_router,
     statistics_router,
     language_router,
     settings_router,
     premium_router,
+    info_router,
     admin_router,
 )
-from app.middlewares import MaintenanceMiddleware
+from app.middlewares import MaintenanceMiddleware, PasswordLockMiddleware
 from app.services.auto_reply_engine import auto_reply_engine
 from app.services.first_message_engine import first_message_engine
 from app.services.security_service import set_bot_instance
@@ -70,6 +76,53 @@ def create_bot() -> Bot:
 
 
 # ============================================================
+# GLOBAL ERROR HANDLING (25-bo'lim)
+# ============================================================
+#
+# Har bir handler o'zining try/except'iga ega, lekin bu —
+# oxirgi xavfsizlik chizig'i: kutilmagan (handler ichida
+# tutilmagan) har qanday xatolik shu yerda ushlanadi.
+#
+# Foydalanuvchiga faqat xavfsiz, umumiy xabar ko'rsatiladi.
+# Logda texnik exception bo'lishi mumkin, lekin
+# SecretRedactingFormatter orqali maxfiy qiymatlar avtomatik
+# yashiriladi.
+
+async def global_error_handler(event: ErrorEvent) -> None:
+    logger.exception(
+        "Kutilmagan (global) xatolik: %s",
+        type(event.exception).__name__,
+        exc_info=event.exception,
+    )
+
+    update = event.update
+
+    chat_id = None
+
+    if update.message is not None:
+        chat_id = update.message.chat.id
+    elif (
+        update.callback_query is not None
+        and update.callback_query.message is not None
+    ):
+        chat_id = update.callback_query.message.chat.id
+
+    if chat_id is None:
+        return
+
+    try:
+        await event.update.bot.send_message(
+            chat_id,
+            "❌ Xatolik yuz berdi. Iltimos, qayta urinib "
+            "ko'ring.",
+        )
+    except Exception:
+        logger.exception(
+            "Global error handler xabarni yubora olmadi."
+        )
+
+
+# ============================================================
 # DISPATCHER
 # ============================================================
 
@@ -82,11 +135,20 @@ def create_dispatcher() -> Dispatcher:
 
     dp = Dispatcher()
 
+    dp.errors.register(global_error_handler)
+
     # Maintenance mode yoqilganda admin bo'lmagan foydalanuvchi
     # so'rovlarini bloklaydi (admin uchun har doim o'tkaziladi).
     maintenance_middleware = MaintenanceMiddleware()
     dp.message.outer_middleware(maintenance_middleware)
     dp.callback_query.outer_middleware(maintenance_middleware)
+
+    # Bot paroli (inactivity lock) — Maintenance'dan KEYIN
+    # ro'yxatdan o'tkaziladi, shunda texnik ishlar rejimi
+    # ustuvorlikka ega bo'ladi.
+    password_lock_middleware = PasswordLockMiddleware()
+    dp.message.outer_middleware(password_lock_middleware)
+    dp.callback_query.outer_middleware(password_lock_middleware)
 
     return dp
 
@@ -103,29 +165,45 @@ def register_routers(dp: Dispatcher) -> None:
     # Eng avval /start
     dp.include_router(start_router)
 
-    # Telegram ulash
+    # Bot paroli (inactivity lock) challenge handleri —
+    # yuqori ustuvorlik.
+    dp.include_router(password_lock_router)
+
+    # Yangi inline Bosh menyu (nano:main)
+    dp.include_router(main_router)
+
+    # Nano-Agent (nano:agent va uning menyusi)
+    dp.include_router(agent_router)
+
+    # Telegram ulash (nano:agent:telegram + eski flow)
     dp.include_router(telegram_connect_router)
 
-    # Avto javoblar
+    # Avto javoblar (mavjud inline tizim, ar:*)
     dp.include_router(auto_replies_router)
 
-    # Birinchi xabar
+    # Birinchi xabar (nano:agent:first)
     dp.include_router(first_message_router)
+
+    # Nano-Yordamchi (YouTube-Save / Insta-Save)
+    dp.include_router(assistant_router)
 
     # Referallar
     dp.include_router(referrals_router)
 
-    # Statistika
+    # Statistika (legacy)
     dp.include_router(statistics_router)
 
-    # Til
+    # Til (legacy — endi Sozlamalar ichida ham mavjud)
     dp.include_router(language_router)
 
-    # Sozlamalar
+    # Sozlamalar (til/premium/profil/parol)
     dp.include_router(settings_router)
 
-    # Premium
+    # Premium (legacy)
     dp.include_router(premium_router)
+
+    # Nano-Info
+    dp.include_router(info_router)
 
     # Admin panel
     dp.include_router(admin_router)

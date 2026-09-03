@@ -115,6 +115,48 @@ class UserSettings(Base):
         nullable=False,
     )
 
+    # ------------------------------------------------------
+    # BOT PAROLI / INACTIVITY LOCK (21-bo'lim)
+    # ------------------------------------------------------
+    # MUHIM: bu — Telegram akkaunt paroli/2FA EMAS. Bu faqat
+    # Nano-Bot'ning O'ZIGA kirishni himoyalovchi, foydalanuvchi
+    # o'rnatgan qo'shimcha parol. Hech qachon plain text
+    # saqlanmaydi — faqat bcrypt hash.
+
+    password_hash: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    password_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+
+    last_activity_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    authenticated_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    failed_password_attempts: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+
+    password_locked_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -786,6 +828,47 @@ class Statistics(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+
+# ============================================================
+# STATISTICS EVENT
+# ============================================================
+#
+# `Statistics` jadvali faqat KUMULYATIV hisoblagichlarni
+# saqlaydi (jami son) — undan "bugun/7 kun/30 kun" kabi vaqt
+# oralig'idagi sonlarni hisoblab bo'lmaydi. Shu sababli, FAQAT
+# shu aniq ehtiyoj uchun, juda minimal (vaqt belgisi + tur)
+# yozuv jadvali qo'shildi. Xabar mazmuni SAQLANMAYDI — faqat
+# "auto_reply" yoki "first_message" yuborilgani va qachon.
+
+class StatisticsEvent(Base):
+    __tablename__ = "statistics_events"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    event_type: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
     )
 
 
