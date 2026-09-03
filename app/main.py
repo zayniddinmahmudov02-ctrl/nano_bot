@@ -13,6 +13,7 @@ from app.database.db import (
     check_database,
     close_database,
     create_tables,
+    run_manual_migrations,
 )
 from app.handlers import (
     start_router,
@@ -26,6 +27,7 @@ from app.handlers import (
     premium_router,
 )
 from app.services.auto_reply_engine import auto_reply_engine
+from app.services.first_message_engine import first_message_engine
 from app.telegram.user_client import telegram_client_manager
 
 
@@ -160,6 +162,18 @@ async def startup() -> None:
     logger.info("Database jadvallari tayyor.")
 
     # --------------------------------------------------------
+    # MANUAL MIGRATIONS (yangi ustunlar)
+    # --------------------------------------------------------
+
+    try:
+        await run_manual_migrations()
+
+    except Exception:
+        logger.exception(
+            "Manual migratsiyalarda xatolik."
+        )
+
+    # --------------------------------------------------------
     # TELEGRAM USER SESSIONS
     # --------------------------------------------------------
 
@@ -191,6 +205,22 @@ async def startup() -> None:
             "Auto Reply Engine ishga tushmadi."
         )
 
+    # --------------------------------------------------------
+    # FIRST MESSAGE ENGINE
+    # --------------------------------------------------------
+
+    try:
+        await first_message_engine.start()
+
+        logger.info(
+            "First Message Engine ishga tushdi."
+        )
+
+    except Exception:
+        logger.exception(
+            "First Message Engine ishga tushmadi."
+        )
+
     logger.info("Nano-Bot ishga tayyor.")
 
 
@@ -219,6 +249,22 @@ async def shutdown() -> None:
     except Exception:
         logger.exception(
             "Auto Reply Engine to'xtatishda xatolik."
+        )
+
+    # --------------------------------------------------------
+    # FIRST MESSAGE ENGINE
+    # --------------------------------------------------------
+
+    try:
+        await first_message_engine.stop()
+
+        logger.info(
+            "First Message Engine to'xtatildi."
+        )
+
+    except Exception:
+        logger.exception(
+            "First Message Engine to'xtatishda xatolik."
         )
 
     # --------------------------------------------------------

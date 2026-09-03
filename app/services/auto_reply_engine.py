@@ -12,6 +12,7 @@ from app.database.models import (
     TelegramAccount,
     User,
 )
+from app.services.media_service import send_stored_post
 from app.telegram.user_client import telegram_client_manager
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,10 @@ class AutoReplyEngine:
                         "message_text": auto_reply.message_text,
                         "file_id": auto_reply.file_id,
                         "link": auto_reply.link,
+                        "storage_chat_id": auto_reply.storage_chat_id,
+                        "storage_message_id": (
+                            auto_reply.storage_message_id
+                        ),
                         "keywords": keywords,
                     }
                 )
@@ -146,6 +151,20 @@ class AutoReplyEngine:
             message_text = auto_reply["message_text"]
             file_id = auto_reply["file_id"]
             link = auto_reply["link"]
+            storage_chat_id = auto_reply.get("storage_chat_id")
+            storage_message_id = auto_reply.get(
+                "storage_message_id"
+            )
+
+            # Auto Reply 2.0: media Storage Channel orqali,
+            # forward emas — yangi xabar sifatida yuboriladi.
+            if storage_chat_id and storage_message_id:
+                return await send_stored_post(
+                    telethon_client=client,
+                    storage_chat_id=storage_chat_id,
+                    storage_message_id=storage_message_id,
+                    target_chat_id=event.chat_id,
+                )
 
             if message_type == "text":
                 if not message_text:

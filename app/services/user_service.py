@@ -6,7 +6,7 @@ from aiogram.types import User as TelegramUser
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.models import User, UserSettings
+from app.database.models import TelegramAccount, User, UserSettings
 
 
 async def get_user_by_telegram_id(
@@ -112,9 +112,33 @@ async def ensure_user(
     )
 
 
+async def get_connected_telegram_account(
+    session: AsyncSession,
+    user_id: int,
+) -> Optional[TelegramAccount]:
+    """
+    Foydalanuvchining ulangan (is_connected=True) Telegram
+    akkauntini qaytaradi.
+
+    MUHIM:
+    user_id — users.id (ichki PostgreSQL ID).
+    """
+
+    result = await session.execute(
+        select(TelegramAccount)
+        .where(TelegramAccount.user_id == user_id)
+        .where(TelegramAccount.is_connected.is_(True))
+        .order_by(TelegramAccount.id.asc())
+        .limit(1)
+    )
+
+    return result.scalar_one_or_none()
+
+
 __all__ = [
     "get_user_by_telegram_id",
     "get_or_create_user",
     "get_user_id_by_telegram_id",
     "ensure_user",
+    "get_connected_telegram_account",
 ]

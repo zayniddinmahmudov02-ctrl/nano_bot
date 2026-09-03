@@ -4,6 +4,7 @@ from app.database.db import (
     engine,
     check_database,
     create_tables,
+    run_manual_migrations,
     close_database,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "engine",
     "check_database",
     "create_tables",
+    "run_manual_migrations",
     "close_database",
 ]

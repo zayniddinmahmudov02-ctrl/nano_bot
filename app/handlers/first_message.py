@@ -3,17 +3,39 @@ import logging
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.database.models import FirstMessage
 from app.keyboards.main import main_menu_keyboard
-from app.services.user_service import get_user_by_telegram_id
+from app.services.media_service import (
+    detect_post_content,
+    send_post_to_storage,
+)
+from app.services.storage_channel_service import ensure_storage_channel
+from app.services.user_service import (
+    get_connected_telegram_account,
+    get_user_by_telegram_id,
+)
+from app.telegram.user_client import telegram_client_manager
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+INTERVAL_HOUR = 3600
+INTERVAL_DAY = 86400
+
+INTERVAL_LABELS = {
+    INTERVAL_HOUR: "⏱ Har 1 soatdan keyin",
+    INTERVAL_DAY: "📅 Har 1 kundan keyin",
+}
 
 
 class FirstMessageStates(StatesGroup):
@@ -33,16 +55,36 @@ def first_message_keyboard():
 
     builder.button(text="➕ Birinchi xabar yaratish")
     builder.button(text="✏️ Birinchi xabarni o‘zgartirish")
+    builder.button(text="⏱ Qayta yuborish vaqti")
     builder.button(text="🗑 Birinchi xabarni o‘chirish")
     builder.button(text="🔄 Yoqish / O‘chirish")
     builder.button(text="📋 Birinchi xabar holati")
     builder.button(text="🏠 Bosh menyu")
 
-    builder.adjust(2, 2, 1, 1)
+    builder.adjust(2, 2, 1, 1, 1)
 
     return builder.as_markup(
         resize_keyboard=True,
         is_persistent=True,
+    )
+
+
+def first_message_interval_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=INTERVAL_LABELS[INTERVAL_HOUR],
+                    callback_data=f"fm_interval:{INTERVAL_HOUR}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=INTERVAL_LABELS[INTERVAL_DAY],
+                    callback_data=f"fm_interval:{INTERVAL_DAY}",
+                ),
+            ],
+        ]
     )
 
 
@@ -95,16 +137,26 @@ async def first_message_menu(
         else "🔴 O‘chiq"
     )
 
+    interval_label = INTERVAL_LABELS.get(
+        first_message.repeat_interval_seconds,
+        f"{first_message.repeat_interval_seconds} soniya",
+    )
+
     await message.answer(
         "1️⃣ <b>Birinchi xabar</b>\n\n"
         f"📦 Tur: <code>{first_message.message_type}</code>\n"
-        f"📊 Holat: <b>{status}</b>\n\n"
+        f"📊 Holat: <b>{status}</b>\n"
+        f"🔁 Qayta yuborish: <b>{interval_label}</b>\n\n"
         "Birinchi marta yozgan foydalanuvchiga "
         "avtomatik yuboriladigan xabarni "
         "boshqarishingiz mumkin.",
         reply_markup=first_message_keyboard(),
     )
 
+
+# ============================================================
+# CREATE
+# ============================================================
 
 @router.message(F.text == "➕ Birinchi xabar yaratish")
 async def create_first_message_start(
@@ -122,6 +174,20 @@ async def create_first_message_start(
         if user is None:
             await message.answer(
                 "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        account = await get_connected_telegram_account(
+            session,
+            user.id,
+        )
+
+        if account is None:
+            await message.answer(
+                "❌ Birinchi xabardan foydalanish uchun "
+                "avval Telegram akkauntingizni ulang.\n\n"
+                "📱 «Telegram ulash» bo‘limiga kiring.",
                 reply_markup=main_menu_keyboard(),
             )
             return
@@ -154,6 +220,11 @@ async def create_first_message_start(
         "Matn, rasm, video yoki hujjat yuborishingiz mumkin.\n\n"
         "Bu xabar sizning Telegram akkauntingizga "
         "birinchi marta yozgan foydalanuvchiga yuboriladi.\n\n"
+        "⚠️ <b>Eslatma:</b>\n"
+        "Post alohida Nano-Bot Storage kanalida saqlanadi va "
+        "kerak bo‘lganda shu kanal orqali yuboriladi.\n\n"
+        "❗ Iltimos, konfiguratsiya jarayonidagi xabarlarni "
+        "o‘chirmang.\n\n"
         "Bekor qilish uchun:\n"
         "❌ Bekor qilish"
     )
@@ -182,30 +253,11 @@ async def receive_first_message(
     message: Message,
     state: FSMContext,
 ) -> None:
-    message_type = None
-    text = None
-    file_id = None
+    message_type, text, file_id, file_name = (
+        detect_post_content(message)
+    )
 
-    if message.text:
-        message_type = "text"
-        text = message.text
-
-    elif message.photo:
-        message_type = "photo"
-        file_id = message.photo[-1].file_id
-        text = message.caption
-
-    elif message.video:
-        message_type = "video"
-        file_id = message.video.file_id
-        text = message.caption
-
-    elif message.document:
-        message_type = "document"
-        file_id = message.document.file_id
-        text = message.caption
-
-    else:
+    if message_type is None:
         await message.answer(
             "❌ Bu turdagi xabar qo‘llab-quvvatlanmaydi.\n\n"
             "Matn, rasm, video yoki hujjat yuboring."
@@ -213,6 +265,98 @@ async def receive_first_message(
         return
 
     telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await state.clear()
+
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        account = await get_connected_telegram_account(
+            session,
+            user.id,
+        )
+
+        if account is None:
+            await state.clear()
+
+            await message.answer(
+                "❌ Avval Telegram akkauntingizni ulang.\n\n"
+                "📱 «Telegram ulash» bo‘limiga kiring.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            await state.clear()
+
+            await message.answer(
+                "⚠️ Birinchi xabar allaqachon mavjud.",
+                reply_markup=first_message_keyboard(),
+            )
+            return
+
+        db_user_id = user.id
+        telegram_account_id = account.id
+
+    storage_channel = await ensure_storage_channel(
+        telegram_id=telegram_id,
+        db_user_id=db_user_id,
+        telegram_account_id=telegram_account_id,
+    )
+
+    if storage_channel is None:
+        await message.answer(
+            "❌ Storage kanalni tayyorlashda xatolik yuz berdi.\n\n"
+            "Birozdan keyin qayta urinib ko‘ring yoki Telegram "
+            "akkauntingizni qayta ulang."
+        )
+        return
+
+    telethon_client = telegram_client_manager.get_client(
+        telegram_id
+    )
+
+    if telethon_client is None:
+        await message.answer(
+            "❌ Telegram akkaunt ulanishi topilmadi.\n\n"
+            "Iltimos, akkauntingizni qayta ulang."
+        )
+        return
+
+    storage_message_id = await send_post_to_storage(
+        bot=message.bot,
+        telethon_client=telethon_client,
+        storage_chat_id=storage_channel.chat_id,
+        message_type=message_type,
+        text=text,
+        file_id=file_id,
+        file_name=file_name,
+    )
+
+    if storage_message_id is None:
+        await message.answer(
+            "❌ Postni saqlashda xatolik yuz berdi.\n\n"
+            "Qayta urinib ko‘ring."
+        )
+        return
 
     async with AsyncSessionLocal() as session:
         user = await get_user_by_telegram_id(
@@ -250,8 +394,10 @@ async def receive_first_message(
             user_id=user.id,
             message_type=message_type,
             text=text,
-            file_id=file_id,
             link=None,
+            storage_chat_id=storage_channel.chat_id,
+            storage_message_id=storage_message_id,
+            repeat_interval_seconds=INTERVAL_HOUR,
             active=True,
         )
 
@@ -264,12 +410,20 @@ async def receive_first_message(
     await message.answer(
         "✅ <b>Birinchi xabar yaratildi!</b>\n\n"
         f"📦 Tur: <code>{message_type}</code>\n"
-        "🟢 Holat: <b>Faol</b>\n\n"
+        "🟢 Holat: <b>Faol</b>\n"
+        f"🔁 Qayta yuborish: "
+        f"<b>{INTERVAL_LABELS[INTERVAL_HOUR]}</b>\n\n"
         "Endi birinchi marta yozgan foydalanuvchilarga "
-        "ushbu xabar yuboriladi.",
+        "ushbu xabar yuboriladi.\n\n"
+        "⏱ Qayta yuborish vaqtini o‘zgartirish uchun "
+        "«⏱ Qayta yuborish vaqti» tugmasidan foydalaning.",
         reply_markup=first_message_keyboard(),
     )
 
+
+# ============================================================
+# EDIT
+# ============================================================
 
 @router.message(F.text == "✏️ Birinchi xabarni o‘zgartirish")
 async def edit_first_message_start(
@@ -343,36 +497,110 @@ async def receive_edit_first_message(
     message: Message,
     state: FSMContext,
 ) -> None:
-    message_type = None
-    text = None
-    file_id = None
+    message_type, text, file_id, file_name = (
+        detect_post_content(message)
+    )
 
-    if message.text:
-        message_type = "text"
-        text = message.text
-
-    elif message.photo:
-        message_type = "photo"
-        file_id = message.photo[-1].file_id
-        text = message.caption
-
-    elif message.video:
-        message_type = "video"
-        file_id = message.video.file_id
-        text = message.caption
-
-    elif message.document:
-        message_type = "document"
-        file_id = message.document.file_id
-        text = message.caption
-
-    else:
+    if message_type is None:
         await message.answer(
-            "❌ Bu turdagi xabar qo‘llab-quvvatlanmaydi."
+            "❌ Bu turdagi xabar qo‘llab-quvvatlanmaydi.\n\n"
+            "Matn, rasm, video yoki hujjat yuboring."
         )
         return
 
     telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await state.clear()
+
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        account = await get_connected_telegram_account(
+            session,
+            user.id,
+        )
+
+        if account is None:
+            await state.clear()
+
+            await message.answer(
+                "❌ Avval Telegram akkauntingizni ulang.\n\n"
+                "📱 «Telegram ulash» bo‘limiga kiring.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        first_message = result.scalar_one_or_none()
+
+        if first_message is None:
+            await state.clear()
+
+            await message.answer(
+                "❌ Birinchi xabar topilmadi.",
+                reply_markup=first_message_keyboard(),
+            )
+            return
+
+        db_user_id = user.id
+        telegram_account_id = account.id
+
+    storage_channel = await ensure_storage_channel(
+        telegram_id=telegram_id,
+        db_user_id=db_user_id,
+        telegram_account_id=telegram_account_id,
+    )
+
+    if storage_channel is None:
+        await message.answer(
+            "❌ Storage kanalni tayyorlashda xatolik yuz berdi.\n\n"
+            "Birozdan keyin qayta urinib ko‘ring yoki Telegram "
+            "akkauntingizni qayta ulang."
+        )
+        return
+
+    telethon_client = telegram_client_manager.get_client(
+        telegram_id
+    )
+
+    if telethon_client is None:
+        await message.answer(
+            "❌ Telegram akkaunt ulanishi topilmadi.\n\n"
+            "Iltimos, akkauntingizni qayta ulang."
+        )
+        return
+
+    storage_message_id = await send_post_to_storage(
+        bot=message.bot,
+        telethon_client=telethon_client,
+        storage_chat_id=storage_channel.chat_id,
+        message_type=message_type,
+        text=text,
+        file_id=file_id,
+        file_name=file_name,
+    )
+
+    if storage_message_id is None:
+        await message.answer(
+            "❌ Postni saqlashda xatolik yuz berdi.\n\n"
+            "Qayta urinib ko‘ring."
+        )
+        return
 
     async with AsyncSessionLocal() as session:
         user = await get_user_by_telegram_id(
@@ -408,8 +636,10 @@ async def receive_edit_first_message(
 
         first_message.message_type = message_type
         first_message.text = text
-        first_message.file_id = file_id
+        first_message.file_id = None
         first_message.link = None
+        first_message.storage_chat_id = storage_channel.chat_id
+        first_message.storage_message_id = storage_message_id
 
         await session.commit()
 
@@ -421,6 +651,140 @@ async def receive_edit_first_message(
         reply_markup=first_message_keyboard(),
     )
 
+
+# ============================================================
+# INTERVAL
+# ============================================================
+
+@router.message(F.text == "⏱ Qayta yuborish vaqti")
+async def first_message_interval_menu(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    await state.clear()
+
+    telegram_id = int(message.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        first_message = result.scalar_one_or_none()
+
+    if first_message is None:
+        await message.answer(
+            "❌ Avval birinchi xabar yarating.",
+            reply_markup=first_message_keyboard(),
+        )
+        return
+
+    current_label = INTERVAL_LABELS.get(
+        first_message.repeat_interval_seconds,
+        f"{first_message.repeat_interval_seconds} soniya",
+    )
+
+    await message.answer(
+        "⏱ <b>Qayta yuborish vaqti</b>\n\n"
+        f"Hozirgi tanlov: <b>{current_label}</b>\n\n"
+        "Birinchi xabar bir kontaktga qachon qayta "
+        "yuborilishini tanlang:",
+        reply_markup=first_message_interval_inline_keyboard(),
+    )
+
+
+@router.callback_query(F.data.startswith("fm_interval:"))
+async def set_first_message_interval(
+    callback: CallbackQuery,
+) -> None:
+    if callback.from_user is None or callback.data is None:
+        await callback.answer()
+        return
+
+    try:
+        interval_seconds = int(
+            callback.data.split(":", 1)[1]
+        )
+    except (IndexError, ValueError):
+        await callback.answer(
+            "❌ Noto‘g‘ri tanlov.",
+            show_alert=True,
+        )
+        return
+
+    if interval_seconds not in INTERVAL_LABELS:
+        await callback.answer(
+            "❌ Noto‘g‘ri tanlov.",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = int(callback.from_user.id)
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await callback.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                show_alert=True,
+            )
+            return
+
+        result = await session.execute(
+            select(FirstMessage).where(
+                FirstMessage.user_id == user.id
+            )
+        )
+
+        first_message = result.scalar_one_or_none()
+
+        if first_message is None:
+            await callback.answer(
+                "❌ Birinchi xabar topilmadi.",
+                show_alert=True,
+            )
+            return
+
+        first_message.repeat_interval_seconds = interval_seconds
+
+        await session.commit()
+
+    label = INTERVAL_LABELS[interval_seconds]
+
+    if callback.message is not None:
+        try:
+            await callback.message.edit_text(
+                "⏱ <b>Qayta yuborish vaqti</b>\n\n"
+                f"✅ Saqlandi: <b>{label}</b>",
+                reply_markup=first_message_interval_inline_keyboard(),
+            )
+        except Exception:
+            pass
+
+    await callback.answer("✅ Saqlandi")
+
+
+# ============================================================
+# DELETE
+# ============================================================
 
 @router.message(F.text == "🗑 Birinchi xabarni o‘chirish")
 async def delete_first_message(
@@ -567,6 +931,11 @@ async def first_message_status(
         else "🔴 O‘chiq"
     )
 
+    interval_label = INTERVAL_LABELS.get(
+        first_message.repeat_interval_seconds,
+        f"{first_message.repeat_interval_seconds} soniya",
+    )
+
     preview = (
         first_message.text
         if first_message.text
@@ -579,7 +948,8 @@ async def first_message_status(
     await message.answer(
         "📋 <b>Birinchi xabar holati</b>\n\n"
         f"📊 Holat: <b>{status}</b>\n"
-        f"📦 Tur: <code>{first_message.message_type}</code>\n\n"
+        f"📦 Tur: <code>{first_message.message_type}</code>\n"
+        f"🔁 Qayta yuborish: <b>{interval_label}</b>\n\n"
         "📝 Xabar:\n"
         f"<code>{preview}</code>",
         reply_markup=first_message_keyboard(),

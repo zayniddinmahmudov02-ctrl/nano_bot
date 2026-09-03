@@ -14,11 +14,20 @@ from app.database.models import (
     TelegramAccount,
 )
 from app.keyboards.auto_reply import (
+    auto_reply_cancel_keyboard,
     auto_reply_keyboard,
-    auto_reply_media_keyboard,
 )
 from app.keyboards.main import main_menu_keyboard
-from app.services.user_service import get_user_by_telegram_id
+from app.services.media_service import (
+    detect_post_content,
+    send_post_to_storage,
+)
+from app.services.storage_channel_service import ensure_storage_channel
+from app.services.user_service import (
+    get_connected_telegram_account,
+    get_user_by_telegram_id,
+)
+from app.telegram.user_client import telegram_client_manager
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +36,7 @@ router = Router()
 
 class AutoReplyStates(StatesGroup):
     waiting_keywords = State()
-    waiting_message_type = State()
-    waiting_message = State()
+    waiting_post = State()
 
 
 # ============================================================
@@ -242,107 +250,60 @@ async def receive_keywords(
     )
 
     await state.set_state(
-        AutoReplyStates.waiting_message_type
+        AutoReplyStates.waiting_post
     )
 
     await message.answer(
-        "📩 <b>Javob turini tanlang:</b>",
-        reply_markup=auto_reply_media_keyboard(),
+        "📩 <b>Yuborilishi kerak bo‘lgan postni joylang</b>\n\n"
+        "Auto Reply sifatida yuborilishini xohlagan postni "
+        "shu chatga yuboring.\n\n"
+        "⚠️ <b>Eslatma:</b>\n"
+        "Bot chat tarixidagi xabarlarni doimiy media storage "
+        "sifatida ishlatmaydi. Post alohida Nano-Bot Storage "
+        "kanalida saqlanadi va kerak bo‘lganda shu kanal orqali "
+        "yuboriladi.\n\n"
+        "❗ Iltimos, konfiguratsiya jarayonidagi xabarlarni "
+        "o‘chirmang.",
+        reply_markup=auto_reply_cancel_keyboard(),
     )
 
 
 # ============================================================
-# MESSAGE TYPE
+# CANCEL POST
 # ============================================================
 
 @router.message(
-    AutoReplyStates.waiting_message_type
+    AutoReplyStates.waiting_post,
+    F.text == "❌ Bekor qilish",
 )
-async def receive_message_type(
+async def cancel_post(
     message: Message,
     state: FSMContext,
 ) -> None:
-    type_map = {
-        "📝 Matn": "text",
-        "🖼 Rasm": "photo",
-        "🎥 Video": "video",
-        "📄 Hujjat": "document",
-        "🔗 Link": "link",
-    }
-
-    message_type = type_map.get(
-        message.text or ""
-    )
-
-    if message_type is None:
-        if message.text == "❌ Bekor qilish":
-            await state.clear()
-
-            await message.answer(
-                "❌ Amal bekor qilindi.",
-                reply_markup=auto_reply_keyboard(),
-            )
-            return
-
-        await message.answer(
-            "❌ Iltimos, tugmalardan birini tanlang."
-        )
-        return
-
-    await state.update_data(
-        message_type=message_type
-    )
-
-    await state.set_state(
-        AutoReplyStates.waiting_message
-    )
-
-    instructions = {
-        "text": (
-            "📝 <b>Javob matnini yuboring:</b>"
-        ),
-        "photo": (
-            "🖼 <b>Rasmni yuboring.</b>\n\n"
-            "Rasmga izoh ham qo‘shishingiz mumkin."
-        ),
-        "video": (
-            "🎥 <b>Videoni yuboring.</b>\n\n"
-            "Videoga izoh ham qo‘shishingiz mumkin."
-        ),
-        "document": (
-            "📄 <b>Hujjatni yuboring.</b>\n\n"
-            "Hujjatga izoh ham qo‘shishingiz mumkin."
-        ),
-        "link": (
-            "🔗 <b>Linkni yuboring:</b>\n\n"
-            "Masalan:\n"
-            "<code>https://example.com</code>"
-        ),
-    }
+    await state.clear()
 
     await message.answer(
-        instructions[message_type],
-        reply_markup=auto_reply_media_keyboard(),
+        "❌ Amal bekor qilindi.",
+        reply_markup=auto_reply_keyboard(),
     )
 
 
 # ============================================================
-# SAVE
+# SAVE (Auto Reply 2.0 — Storage Channel asosida)
 # ============================================================
 
 @router.message(
-    AutoReplyStates.waiting_message
+    AutoReplyStates.waiting_post
 )
-async def receive_message(
+async def receive_post(
     message: Message,
     state: FSMContext,
 ) -> None:
     data = await state.get_data()
 
     keywords = data.get("keywords", [])
-    message_type = data.get("message_type")
 
-    if not keywords or not message_type:
+    if not keywords:
         await state.clear()
 
         await message.answer(
@@ -352,102 +313,16 @@ async def receive_message(
         )
         return
 
-    if message.text == "❌ Bekor qilish":
-        await state.clear()
+    message_type, text, file_id, file_name = (
+        detect_post_content(message)
+    )
 
+    if message_type is None:
         await message.answer(
-            "❌ Amal bekor qilindi.",
-            reply_markup=auto_reply_keyboard(),
+            "❌ Qo‘llab-quvvatlanmaydigan post turi.\n\n"
+            "Matn, rasm, video yoki hujjat yuboring."
         )
         return
-
-    message_text = None
-    file_id = None
-    link = None
-
-    # -------------------------
-    # TEXT
-    # -------------------------
-
-    if message_type == "text":
-        if not message.text:
-            await message.answer(
-                "❌ Matnli javob yuboring."
-            )
-            return
-
-        message_text = message.text.strip()
-
-        if not message_text:
-            await message.answer(
-                "❌ Javob matni bo‘sh bo‘lishi mumkin emas."
-            )
-            return
-
-    # -------------------------
-    # PHOTO
-    # -------------------------
-
-    elif message_type == "photo":
-        if not message.photo:
-            await message.answer(
-                "❌ Iltimos, rasm yuboring."
-            )
-            return
-
-        file_id = message.photo[-1].file_id
-        message_text = message.caption
-
-    # -------------------------
-    # VIDEO
-    # -------------------------
-
-    elif message_type == "video":
-        if not message.video:
-            await message.answer(
-                "❌ Iltimos, video yuboring."
-            )
-            return
-
-        file_id = message.video.file_id
-        message_text = message.caption
-
-    # -------------------------
-    # DOCUMENT
-    # -------------------------
-
-    elif message_type == "document":
-        if not message.document:
-            await message.answer(
-                "❌ Iltimos, hujjat yuboring."
-            )
-            return
-
-        file_id = message.document.file_id
-        message_text = message.caption
-
-    # -------------------------
-    # LINK
-    # -------------------------
-
-    elif message_type == "link":
-        if not message.text:
-            await message.answer(
-                "❌ Linkni matn ko‘rinishida yuboring."
-            )
-            return
-
-        link = message.text.strip()
-
-        if not (
-            link.startswith("http://")
-            or link.startswith("https://")
-        ):
-            await message.answer(
-                "❌ Link <code>http://</code> yoki "
-                "<code>https://</code> bilan boshlanishi kerak."
-            )
-            return
 
     telegram_id = int(message.from_user.id)
 
@@ -492,38 +367,119 @@ async def receive_message(
             )
             return
 
-        result = await session.execute(
-            select(TelegramAccount)
-            .where(
-                TelegramAccount.user_id == user.id
-            )
-            .where(
-                TelegramAccount.is_connected.is_(True)
-            )
-            .order_by(
-                TelegramAccount.id.asc()
-            )
-            .limit(1)
+        account = await get_connected_telegram_account(
+            session,
+            user.id,
         )
 
-        account = result.scalar_one_or_none()
+        if account is None:
+            await state.clear()
+
+            await message.answer(
+                "❌ Avval Telegram akkauntingizni ulang.\n\n"
+                "📱 «Telegram ulash» bo‘limiga kiring.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        db_user_id = user.id
+        telegram_account_id = account.id
+
+    storage_channel = await ensure_storage_channel(
+        telegram_id=telegram_id,
+        db_user_id=db_user_id,
+        telegram_account_id=telegram_account_id,
+    )
+
+    if storage_channel is None:
+        await message.answer(
+            "❌ Storage kanalni tayyorlashda xatolik yuz berdi.\n\n"
+            "Birozdan keyin qayta urinib ko‘ring yoki Telegram "
+            "akkauntingizni qayta ulang."
+        )
+        return
+
+    telethon_client = telegram_client_manager.get_client(
+        telegram_id
+    )
+
+    if telethon_client is None:
+        await message.answer(
+            "❌ Telegram akkaunt ulanishi topilmadi.\n\n"
+            "Iltimos, akkauntingizni qayta ulang."
+        )
+        return
+
+    storage_message_id = await send_post_to_storage(
+        bot=message.bot,
+        telethon_client=telethon_client,
+        storage_chat_id=storage_channel.chat_id,
+        message_type=message_type,
+        text=text,
+        file_id=file_id,
+        file_name=file_name,
+    )
+
+    if storage_message_id is None:
+        await message.answer(
+            "❌ Postni saqlashda xatolik yuz berdi.\n\n"
+            "Qayta urinib ko‘ring."
+        )
+        return
+
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(
+            session,
+            telegram_id,
+        )
+
+        if user is None:
+            await state.clear()
+
+            await message.answer(
+                "❌ Foydalanuvchi topilmadi.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        limit = await get_auto_reply_limit(
+            session,
+            user.id,
+        )
+
+        result = await session.execute(
+            select(func.count(AutoReply.id))
+            .where(
+                AutoReply.user_id == user.id
+            )
+        )
+
+        current_count = result.scalar_one()
+
+        if (
+            limit is not None
+            and current_count >= limit
+        ):
+            await state.clear()
+
+            await message.answer(
+                "⚠️ Avto javob limiti to‘lib qolgan.",
+                reply_markup=auto_reply_keyboard(),
+            )
+            return
 
         auto_reply = AutoReply(
             user_id=user.id,
-            telegram_account_id=(
-                account.id
-                if account is not None
-                else None
-            ),
+            telegram_account_id=telegram_account_id,
             title=(
                 keywords[0][:100]
                 if keywords
                 else "Auto Reply"
             ),
             message_type=message_type,
-            message_text=message_text,
-            file_id=file_id,
-            link=link,
+            message_text=text,
+            storage_chat_id=storage_channel.chat_id,
+            storage_message_id=storage_message_id,
             is_active=True,
         )
 
@@ -549,7 +505,7 @@ async def receive_message(
         "Auto reply created: "
         "telegram_id=%s, db_user_id=%s, auto_reply_id=%s",
         telegram_id,
-        user.id,
+        db_user_id,
         auto_reply_id,
     )
 
@@ -557,7 +513,7 @@ async def receive_message(
         "✅ <b>Avto javob yaratildi!</b>\n\n"
         f"🔑 Kalit so‘zlar: "
         f"<b>{', '.join(keywords)}</b>\n"
-        f"📩 Javob turi: "
+        f"📩 Post turi: "
         f"<b>{message_type}</b>\n"
         "🟢 Holat: <b>Faol</b>\n\n"
         "Endi mos keladigan xabar kelganda "

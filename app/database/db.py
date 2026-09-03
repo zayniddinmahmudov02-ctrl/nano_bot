@@ -80,6 +80,46 @@ async def create_tables() -> None:
     )
 
 
+async def run_manual_migrations() -> None:
+    """
+    Mavjud jadvallarga yangi ustunlar qo'shadi.
+
+    MUHIM:
+    - Faqat ADD COLUMN IF NOT EXISTS ishlatiladi.
+    - Hech qanday DROP yoki mavjud ma'lumotni o'zgartirish yo'q.
+    - Idempotent: bir necha marta ishga tushirilsa ham xato bermaydi.
+    """
+
+    statements = [
+        "ALTER TABLE auto_replies "
+        "ADD COLUMN IF NOT EXISTS storage_chat_id BIGINT",
+        "ALTER TABLE auto_replies "
+        "ADD COLUMN IF NOT EXISTS storage_message_id INTEGER",
+        "ALTER TABLE first_messages "
+        "ADD COLUMN IF NOT EXISTS storage_chat_id BIGINT",
+        "ALTER TABLE first_messages "
+        "ADD COLUMN IF NOT EXISTS storage_message_id INTEGER",
+        "ALTER TABLE first_messages "
+        "ADD COLUMN IF NOT EXISTS repeat_interval_seconds "
+        "INTEGER NOT NULL DEFAULT 3600",
+    ]
+
+    try:
+        async with engine.begin() as connection:
+            for statement in statements:
+                await connection.execute(text(statement))
+
+        logger.info(
+            "Manual migratsiyalar muvaffaqiyatli bajarildi."
+        )
+
+    except Exception:
+        logger.exception(
+            "Manual migratsiyalarni bajarishda xatolik."
+        )
+        raise
+
+
 async def close_database() -> None:
     """
     Database connection poolni yopadi.

@@ -17,24 +17,6 @@ def auto_reply_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def auto_reply_media_keyboard() -> ReplyKeyboardMarkup:
-    builder = ReplyKeyboardBuilder()
-
-    builder.button(text="📝 Matn")
-    builder.button(text="🖼 Rasm")
-    builder.button(text="🎥 Video")
-    builder.button(text="📄 Hujjat")
-    builder.button(text="🔗 Link")
-    builder.button(text="❌ Bekor qilish")
-
-    builder.adjust(2, 2, 1, 1)
-
-    return builder.as_markup(
-        resize_keyboard=True,
-        is_persistent=True,
-    )
-
-
 def auto_reply_back_keyboard() -> ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
 
@@ -62,7 +44,6 @@ def auto_reply_cancel_keyboard() -> ReplyKeyboardMarkup:
 
 __all__ = [
     "auto_reply_keyboard",
-    "auto_reply_media_keyboard",
     "auto_reply_back_keyboard",
     "auto_reply_cancel_keyboard",
 ]

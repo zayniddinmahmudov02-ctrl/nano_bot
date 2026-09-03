@@ -19,7 +19,13 @@ from app.database import AsyncSessionLocal
 from app.database.models import TelegramAccount
 from app.keyboards.main import main_menu_keyboard
 from app.keyboards.telegram import telegram_menu_keyboard
-from app.services.user_service import get_user_by_telegram_id
+from app.services.auto_reply_engine import auto_reply_engine
+from app.services.first_message_engine import first_message_engine
+from app.services.storage_channel_service import ensure_storage_channel
+from app.services.user_service import (
+    get_connected_telegram_account,
+    get_user_by_telegram_id,
+)
 from app.telegram.user_client import telegram_client_manager
 
 
@@ -421,6 +427,8 @@ async def receive_code(
 
             await state.clear()
 
+            await _post_connect_setup(telegram_id)
+
             await message.answer(
                 "✅ <b>Telegram akkaunt muvaffaqiyatli ulandi!</b>\n\n"
                 "Endi Nano-Bot ulangan Telegram akkauntingiz "
@@ -559,6 +567,8 @@ async def receive_password(
 
             await state.clear()
 
+            await _post_connect_setup(telegram_id)
+
             await message.answer(
                 "✅ <b>Telegram akkaunt muvaffaqiyatli ulandi!</b>\n\n"
                 "2FA tekshiruvi muvaffaqiyatli yakunlandi.\n\n"
@@ -582,6 +592,59 @@ async def receive_password(
         await message.answer(
             "❌ 2FA parolini tekshirishda xatolik yuz berdi.\n\n"
             "Parolni qayta tekshirib yuboring."
+        )
+
+
+# ============================================================
+# ULANISHDAN KEYINGI SOZLASH
+# ============================================================
+#
+# Telegram akkaunt muvaffaqiyatli ulangandan keyin:
+# - Foydalanuvchi nomidan shaxsiy Storage Channel tayyorlanadi
+# - Auto Reply va First Message listenerlari ishga tushiriladi
+#
+# Bu funksiya xato bersa ham ulanish jarayonini yiqitmaydi —
+# faqat logga yoziladi (maxfiy ma'lumotlarsiz).
+
+async def _post_connect_setup(
+    telegram_id: int,
+) -> None:
+    telegram_id = int(telegram_id)
+
+    try:
+        async with AsyncSessionLocal() as session:
+            user = await get_user_by_telegram_id(
+                session,
+                telegram_id,
+            )
+
+            if user is None:
+                return
+
+            account = await get_connected_telegram_account(
+                session,
+                user.id,
+            )
+
+            if account is None:
+                return
+
+            db_user_id = user.id
+            telegram_account_id = account.id
+
+        await ensure_storage_channel(
+            telegram_id=telegram_id,
+            db_user_id=db_user_id,
+            telegram_account_id=telegram_account_id,
+        )
+
+        await auto_reply_engine.start_for_user(db_user_id)
+        await first_message_engine.start_for_user(db_user_id)
+
+    except Exception:
+        logger.exception(
+            "Post-connect setup xatosi: telegram_id=%s",
+            telegram_id,
         )
 
 

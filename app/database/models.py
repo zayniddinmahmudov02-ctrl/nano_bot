@@ -10,13 +10,12 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
-
-class Base(DeclarativeBase):
-    pass
+from app.database.db import Base
 
 
 # ============================================================
@@ -262,6 +261,19 @@ class AutoReply(Base):
         nullable=True,
     )
 
+    # Nano-Bot Storage kanalidagi post reference.
+    # Auto Reply 2.0: media Bot API file_id emas,
+    # shu ustunlar orqali Storage Channel'dan olinadi.
+    storage_chat_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+
+    storage_message_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -356,7 +368,163 @@ class FirstMessage(Base):
         nullable=True,
     )
 
+    # Nano-Bot Storage kanalidagi post reference.
+    # First Message 2.0: media Bot API file_id emas,
+    # shu ustunlar orqali Storage Channel'dan olinadi.
+    storage_chat_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+
+    storage_message_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    # Bir xil kontaktga First Message qayta yuborilishi
+    # uchun kutiladigan interval (soniyalarda).
+    # 3600 = har 1 soatdan keyin, 86400 = har 1 kundan keyin.
+    repeat_interval_seconds: Mapped[int] = mapped_column(
+        Integer,
+        default=3600,
+        server_default="3600",
+        nullable=False,
+    )
+
     active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+# ============================================================
+# FIRST MESSAGE CONTACT
+# ============================================================
+#
+# Foydalanuvchining shaxsiy Telegram akkauntiga birinchi marta
+# (yoki interval o'tgandan keyin qayta) yozgan kontaktlarni
+# kuzatish uchun. Chat content saqlanmaydi — faqat texnik
+# vaqt belgilari.
+
+class FirstMessageContact(Base):
+    __tablename__ = "first_message_contacts"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "telegram_account_id",
+            "peer_id",
+            name="uq_first_message_contacts_account_peer",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    telegram_account_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("telegram_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    peer_id: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        index=True,
+    )
+
+    last_incoming_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    last_first_message_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+# ============================================================
+# TELEGRAM STORAGE CHANNEL
+# ============================================================
+#
+# Har bir ulangan Telegram akkaunt uchun shu akkaunt nomidan
+# yaratilgan shaxsiy "Nano-Bot Storage" kanali. Auto Reply va
+# First Message postlari shu kanalda saqlanadi — DB'da media
+# faylning o'zi saqlanmaydi, faqat message reference.
+
+class TelegramStorageChannel(Base):
+    __tablename__ = "telegram_storage_channels"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    telegram_account_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("telegram_accounts.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+
+    title: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
         nullable=False,
