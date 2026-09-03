@@ -16,6 +16,10 @@ from app.database.models import (
     User,
 )
 from app.services.media_service import send_stored_post
+from app.services.telegram_event_filters import (
+    is_private_incoming_event,
+    validate_private_user_event,
+)
 from app.telegram.user_client import telegram_client_manager
 
 logger = logging.getLogger(__name__)
@@ -247,7 +251,19 @@ class FirstMessageEngine:
                 )
                 return False
 
-            @client.on(events.NewMessage(incoming=True))
+            # MUHIM: `func=` — Telethon darajasidagi ARZON,
+            # sinxron filter. Guruh/superguruh/kanal xabarlari
+            # va o'zimiz yuborgan xabarlar `_handle_message()`
+            # chaqirilishidan OLDIN chetlab o'tiladi (keraksiz
+            # task yaratilmaydi). To'liq (sender turi kabi)
+            # tekshiruv baribir `_handle_message()` ichida ham
+            # qayta bajariladi — bu ikkinchi, defensiv qatlam.
+            @client.on(
+                events.NewMessage(
+                    incoming=True,
+                    func=is_private_incoming_event,
+                )
+            )
             async def handle_new_message(event):
                 await self._handle_message(
                     db_user_id=db_user_id,
@@ -281,21 +297,24 @@ class FirstMessageEngine:
         event,
     ) -> None:
         try:
-            # O'zimiz yuborgan xabarni ignore qilamiz.
-            if getattr(event, "out", False):
-                return
-
-            # Faqat shaxsiy (private) chatlar uchun ishlaydi.
-            if not event.is_private:
+            # MUHIM ARXITEKTURA QOIDASI: barcha defensiv
+            # tekshiruvlar (private chat, real User, bot emas,
+            # service xabar emas, self-message emas) — DB
+            # so'rovlaridan OLDIN, yagona umumiy filter orqali
+            # bajariladi. Telethon event obuna darajasidagi
+            # `func=is_private_incoming_event` filtri faqat
+            # arzon/sinxron holatlarni oldindan chetlab o'tadi —
+            # bu yerdagi tekshiruv har doim MUSTAQIL qayta
+            # bajariladi (ichki processing funksiyasi sifatida).
+            if not await validate_private_user_event(
+                event,
+                log_prefix="First Message",
+            ):
                 return
 
             message = event.message
 
             if message is None:
-                return
-
-            # Service (action) xabarlarni e'tiborsiz qoldiramiz.
-            if getattr(message, "action", None) is not None:
                 return
 
             peer_id = int(event.chat_id)
