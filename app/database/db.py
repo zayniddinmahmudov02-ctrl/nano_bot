@@ -173,38 +173,84 @@ async def run_manual_migrations() -> None:
         "CREATE INDEX IF NOT EXISTS ix_payments_telegram_id "
         "ON payments (telegram_id)",
         # ------------------------------------------------------
-        # STATISTICS — "people_replied" NOT NULL xatosi tuzatildi
+        # STATISTICS — orphaned/legacy NOT NULL ustunlar
         # ------------------------------------------------------
         # MUHIM: serverdagi haqiqiy `statistics` jadvalida ORM
-        # modeli bilmaydigan, eski/orphaned `people_replied`
-        # ustuni mavjud (NOT NULL, DEFAULT'siz) — bu joriy kod
-        # hech qachon `people_replied`ga yozmaydi (butun loyihada
-        # faqat `replied_people` ishlatiladi), shu sabab har bir
-        # yangi INSERT
-        #   NotNullViolationError: null value in column
-        #   "people_replied" of relation "statistics"
+        # modeli BILMAYDIGAN, eski/orphaned ustunlar mavjud
+        # ekanligi amalda tasdiqlandi — avval `people_replied`
+        # (endi kodda `replied_people`), keyin `total_auto_replies`
+        # (endi kodda `auto_replies`). Bular avvalgi schema
+        # versiyasidan qolgan, NOT NULL, DEFAULT'siz ustunlar —
+        # ORM ularga hech qachon yozmagani uchun har bir yangi
+        # INSERT
+        #   NotNullViolationError: null value in column "..."
         # xatosi bilan yiqilardi.
         #
-        # Yechim: agar `people_replied` ustuni mavjud bo'lsa,
-        # unga xavfsiz DEFAULT 0 beriladi — shunda uni INSERT
-        # ro'yxatida ko'rsatmagan har qanday so'rov ham (jumladan
-        # ORM'ning o'zi) avtomatik 0 bilan to'ldiriladi.
+        # Bunday nomma-nom ustunlarni birma-bir "kashf qilib"
+        # tuzatish o'rniga (keyingi xato boshqa nom bilan qayta
+        # chiqmasligi uchun), quyidagi DO $$ bloki `statistics`
+        # jadvalidagi BARCHA NOT NULL, DEFAULT'siz, butun sonli
+        # (integer/bigint/smallint/numeric) ustunlarni DINAMIK
+        # ravishda topadi va har biriga xavfsiz DEFAULT 0
+        # beradi — ORM ularni INSERT ro'yxatiga qo'shmasa ham,
+        # Postgres avtomatik 0 bilan to'ldiradi.
+        #
         # MAVJUD QATORLAR VA ULARNING QIYMATLARI BUTUNLAY
-        # BUZILMAYDI — faqat DEFAULT o'rnatiladi, DROP/RENAME
-        # yo'q. Ustun mavjud bo'lmasa (masalan yangi/toza DB) —
-        # shartli tekshiruv tufayli hech narsa qilinmaydi, xato
-        # chiqmaydi.
+        # BUZILMAYDI — faqat DEFAULT o'rnatiladi, hech qanday
+        # DROP/RENAME/UPDATE yo'q. Bunday ustun umuman bo'lmasa
+        # (masalan yangi/toza DB) — sikl shunchaki bo'sh aylanadi,
+        # xato chiqmaydi.
+        """
+        DO $$
+        DECLARE
+            col RECORD;
+        BEGIN
+            FOR col IN
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'statistics'
+                  AND is_nullable = 'NO'
+                  AND column_default IS NULL
+                  AND data_type IN (
+                      'integer', 'bigint', 'smallint', 'numeric'
+                  )
+                  AND column_name <> 'id'
+            LOOP
+                EXECUTE format(
+                    'ALTER TABLE statistics ALTER COLUMN %I '
+                    'SET DEFAULT 0',
+                    col.column_name
+                );
+            END LOOP;
+        END $$;
+        """,
+        # `statistics.user_id` — bitta user uchun ikkita qator
+        # yaratilmasligi DB darajasida kafolatlansin (ilova
+        # darajasidagi "avval tekshir, keyin yarat" logikasi
+        # yagona himoya bo'lib qolmasligi uchun). Modelda
+        # `unique=True` bor, lekin serverdagi haqiqiy jadval shu
+        # cheklovsiz yaratilgan bo'lishi mumkin.
+        #
+        # MUHIM: agar (bugungi kungacha noma'lum sabablarga ko'ra)
+        # jadvalda ALLAQACHON duplicate `user_id` qatorlari mavjud
+        # bo'lsa, oddiy `CREATE UNIQUE INDEX` xato berib, BUTUN
+        # migratsiya tranzaksiyasini (bitta umumiy `engine.begin()`
+        # ichida) orqaga qaytarib yuborardi — shu sabab bu aniq
+        # statement o'zining EXCEPTION bloki bilan izolyatsiya
+        # qilingan: muvaffaqiyatsiz bo'lsa faqat NOTICE yozadi va
+        # qolgan barcha migratsiyalar baribir davom etadi.
         """
         DO $$
         BEGIN
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'statistics'
-                  AND column_name = 'people_replied'
-            ) THEN
-                ALTER TABLE statistics
-                    ALTER COLUMN people_replied SET DEFAULT 0;
-            END IF;
+            BEGIN
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    ix_statistics_user_id_unique
+                    ON statistics (user_id);
+            EXCEPTION WHEN OTHERS THEN
+                RAISE NOTICE
+                    'statistics.user_id unique index skipped: %',
+                    SQLERRM;
+            END;
         END $$;
         """,
         # Modelning o'zi ishlatadigan ustunlar uchun ham
