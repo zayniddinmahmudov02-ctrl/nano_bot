@@ -221,6 +221,12 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "⏳ Downloading, please wait...",
         "de": "⏳ Wird heruntergeladen, bitte warten...",
     },
+    "download_ready": {
+        "uz": "✅ Tayyor!",
+        "ru": "✅ Готово!",
+        "en": "✅ Ready!",
+        "de": "✅ Fertig!",
+    },
     "download_too_large": {
         "uz": "❌ Fayl hajmi ruxsat etilgan chegaradan katta.",
         "ru": "❌ Размер файла превышает допустимый лимит.",

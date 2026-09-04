@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import glob
 import logging
 import os
 import shutil
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.services.media_downloader_common import (
     DOWNLOAD_TIMEOUT_SECONDS,
+    MAX_CAROUSEL_ITEMS,
     MAX_FILE_SIZE_BYTES,
     DownloadResult,
+    classify_media_type,
     cleanup_file,
     make_temp_output_template,
 )
@@ -75,24 +78,29 @@ def _blocking_download(
     import yt_dlp
 
     ydl_opts = {
-        # MUHIM: zamonaviy YouTube deyarli hech qachon tayyor
-        # (video+audio birlashtirilgan) format bermaydi — shu
-        # sababli eng yaxshi video va audio oqimlari alohida
-        # olinib, ffmpeg orqali bitta mp4 faylga birlashtiriladi
-        # (bu — is_ffmpeg_available() orqali oldindan
-        # tekshiriladi). Agar pre-muxed format mavjud bo'lsa
-        # (masalan ba'zi boshqa platformalarda), u ustunlik
-        # oladi va ffmpeg umuman kerak bo'lmaydi.
-        "format": (
-            "best[acodec!=none][vcodec!=none]/"
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo+bestaudio/best"
-        ),
+        # MUHIM (real testlar bilan tasdiqlangan): oldingi
+        # `best[acodec!=none][vcodec!=none]` filtri ko'plab
+        # provayderlarda (masalan Instagram) codec maydonlari
+        # "noma'lum" (None) bo'lgan, lekin AMALDA to'liq
+        # (audio+video birlashtirilgan, ffmpeg SHART EMAS)
+        # formatlarni NOTO'G'RI rad etib, keraksiz ravishda
+        # ffmpeg talab qiluvchi bestvideo+bestaudio yo'liga
+        # tushirib yuborar edi. Oddiy "best" — yt-dlp'ning o'z
+        # ichki tanlash mantig'i — bunday formatlarni to'g'ri
+        # tanlaydi; faqat HAQIQATAN alohida video/audio
+        # oqimlaridan boshqa hech narsa mavjud bo'lmagan holatda
+        # (masalan zamonaviy YouTube) ikkinchi variant —
+        # bestvideo+bestaudio (ffmpeg orqali birlashtirish) —
+        # ishga tushadi.
+        "format": "best/bestvideo+bestaudio",
         "merge_output_format": "mp4",
         "outtmpl": output_path,
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        # Carousel/multi-media postlar uchun: bitta so'rovda
+        # cheksiz ko'p elementni yuklab olishning oldini oladi.
+        "playlistend": MAX_CAROUSEL_ITEMS,
         "max_filesize": MAX_FILE_SIZE_BYTES,
         "logger": _SilentYtDlpLogger(),
         "socket_timeout": 30,
@@ -104,19 +112,65 @@ def _blocking_download(
         return ydl.extract_info(url, download=True)
 
 
+def _glob_pattern_for(output_path: str) -> str:
+    """
+    `output_path` shablonidagi `%(autonumber)s`/`%(ext)s`
+    joy-belgilarini `*` bilan almashtirib, shu YUKLAB OLISH
+    urinishiga tegishli BARCHA haqiqiy fayllarni (carousel
+    elementlari, .part qoldiqlari va h.k.) topish uchun glob
+    naqshini quradi.
+    """
+
+    return output_path.replace(
+        "%(autonumber)s", "*"
+    ).replace("%(ext)s", "*")
+
+
+def _cleanup_all(glob_pattern: str) -> None:
+    """
+    Shu yuklab olish urinishiga tegishli BARCHA vaqtinchalik
+    fayllarni (muvaffaqiyatli saqlangan/tanlanmagan carousel
+    elementlari, chala .part fayllar) diskdan o'chiradi — orphan
+    vaqtinchalik fayl qolmasligi uchun (spec 6-bo'lim).
+    """
+
+    try:
+        for path in glob.glob(glob_pattern):
+            cleanup_file(path)
+    except Exception:
+        logger.exception(
+            "Vaqtinchalik fayllarni tozalashda xatolik."
+        )
+
+
+def _resolve_entry_path(entry: Dict[str, Any]) -> Optional[str]:
+    requested_downloads = entry.get("requested_downloads")
+
+    if requested_downloads:
+        return requested_downloads[0].get("filepath")
+
+    return entry.get("_filename")
+
+
 async def run_download(url: str) -> DownloadResult:
     """
-    Berilgan havoladan videoni vaqtincha diskka yuklab oladi.
+    Berilgan havoladan media(lar)ni vaqtincha diskka yuklab oladi.
 
     Faqat OCHIQ (public) kontent bilan ishlaydi — maxfiy/login
     talab qiladigan kontentni chetlab o'tishga (bypass) hech
     qanday urinish yo'q; yt-dlp shunday holatlarda tabiiy
     ravishda xatolik qaytaradi va biz buni "private" sifatida
     aniq belgilaymiz.
+
+    Carousel/multi-media post bo'lsa — imkon qadar barcha
+    elementlar (MAX_CAROUSEL_ITEMS chegarasigacha) yuklab olinadi;
+    natijaning birinchi elementi `file_path`/`media_type`/`title`
+    orqali, qolganlari `extra_files` orqali qaytariladi.
     """
 
-    output_template = make_temp_output_template("mp4")
+    output_template = make_temp_output_template()
     output_path = str(output_template)
+    glob_pattern = _glob_pattern_for(output_path)
 
     try:
         info = await asyncio.wait_for(
@@ -129,7 +183,7 @@ async def run_download(url: str) -> DownloadResult:
         )
 
     except asyncio.TimeoutError:
-        cleanup_file(output_path)
+        _cleanup_all(glob_pattern)
         logger.warning(
             "Yuklab olish vaqt chegarasidan oshdi (timeout)."
         )
@@ -144,7 +198,7 @@ async def run_download(url: str) -> DownloadResult:
         )
 
     except Exception as error:
-        cleanup_file(output_path)
+        _cleanup_all(glob_pattern)
 
         message = str(error).lower()
 
@@ -187,42 +241,81 @@ async def run_download(url: str) -> DownloadResult:
                 ok=False, error_code="too_large"
             )
 
+        if "requested format is not available" in message:
+            logger.warning(
+                "Yuklab olish rad etildi: mos format topilmadi "
+                "(server ffmpeg'siz birlashtira olmadi bo'lishi "
+                "mumkin)."
+            )
+            return DownloadResult(
+                ok=False, error_code="unavailable"
+            )
+
         logger.exception(
             "Yuklab olishda kutilmagan xatolik."
         )
         return DownloadResult(ok=False, error_code="failed")
 
-    actual_path = output_path
-
-    if info is not None:
-        requested_downloads = info.get("requested_downloads")
-
-        if requested_downloads:
-            actual_path = requested_downloads[0].get(
-                "filepath", output_path
-            )
-        elif info.get("_filename"):
-            actual_path = info.get("_filename")
-
-    if not actual_path or not os.path.exists(actual_path):
+    if info is None:
+        _cleanup_all(glob_pattern)
         return DownloadResult(ok=False, error_code="failed")
 
-    file_size = os.path.getsize(actual_path)
+    # Carousel (playlist) bo'lsa bir nechta entry, aks holda —
+    # bitta "entry" sifatida o'zi.
+    entries: List[Dict[str, Any]] = info.get("entries") or [info]
 
-    if file_size > MAX_FILE_SIZE_BYTES:
-        cleanup_file(actual_path)
-        return DownloadResult(ok=False, error_code="too_large")
+    accepted: List[Tuple[str, str, Optional[str]]] = []
+    had_oversized_candidate = False
+    kept_paths = set()
 
-    if file_size <= 0:
-        cleanup_file(actual_path)
+    for entry in entries[:MAX_CAROUSEL_ITEMS]:
+        if entry is None:
+            continue
+
+        path = _resolve_entry_path(entry)
+
+        if not path or not os.path.exists(path):
+            continue
+
+        file_size = os.path.getsize(path)
+
+        if file_size <= 0:
+            cleanup_file(path)
+            continue
+
+        if file_size > MAX_FILE_SIZE_BYTES:
+            had_oversized_candidate = True
+            cleanup_file(path)
+            continue
+
+        title = entry.get("title") or info.get("title")
+        media_type = classify_media_type(path)
+
+        accepted.append((path, media_type, title))
+        kept_paths.add(os.path.abspath(path))
+
+    # Ushbu urinishga tegishli, lekin YUQORIDA "qabul qilingan"
+    # ro'yxatga kirmagan har qanday boshqa fayl (masalan ishlatil-
+    # magan format probasi, .part qoldiq) — orphan sifatida
+    # o'chiriladi.
+    for path in glob.glob(glob_pattern):
+        if os.path.abspath(path) not in kept_paths:
+            cleanup_file(path)
+
+    if not accepted:
+        if had_oversized_candidate:
+            return DownloadResult(ok=False, error_code="too_large")
+
         return DownloadResult(ok=False, error_code="failed")
 
-    title = info.get("title") if info else None
+    first_path, first_media_type, first_title = accepted[0]
 
     return DownloadResult(
         ok=True,
-        file_path=actual_path,
-        title=title,
+        file_path=first_path,
+        title=first_title,
+        media_type=first_media_type,
+        extra_files=accepted[1:] or None,
     )
 
 
