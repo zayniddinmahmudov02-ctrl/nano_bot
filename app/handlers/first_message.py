@@ -380,10 +380,12 @@ async def receive_first_message(
 
     try:
         storage_message_id = await send_post_to_storage(
+            bot=message.bot,
             telethon_client=telethon_client,
             storage_chat_id=storage_channel.chat_id,
+            source_chat_id=message.chat.id,
             source_message_id=message.message_id,
-            fallback_text=text,
+            content_type=message_type,
             user_id=db_user_id,
             account_id=telegram_account_id,
         )
@@ -628,10 +630,12 @@ async def receive_edit_first_message(
 
     try:
         storage_message_id = await send_post_to_storage(
+            bot=message.bot,
             telethon_client=telethon_client,
             storage_chat_id=storage_channel.chat_id,
+            source_chat_id=message.chat.id,
             source_message_id=message.message_id,
-            fallback_text=text,
+            content_type=message_type,
             user_id=db_user_id,
             account_id=telegram_account_id,
         )

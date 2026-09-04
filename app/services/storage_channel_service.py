@@ -5,10 +5,15 @@ from dataclasses import dataclass
 from typing import Optional
 
 from sqlalchemy import select
-from telethon.errors import RPCError
-from telethon.tl.functions.channels import CreateChannelRequest
-from telethon.tl.types import PeerChannel
+from telethon.errors import RPCError, UserAlreadyParticipantError
+from telethon.tl.functions.channels import (
+    CreateChannelRequest,
+    EditAdminRequest,
+    InviteToChannelRequest,
+)
+from telethon.tl.types import ChatAdminRights, PeerChannel
 
+from app.config import BOT_USERNAME
 from app.database import AsyncSessionLocal
 from app.database.models import TelegramStorageChannel
 from app.telegram.user_client import telegram_client_manager
@@ -157,6 +162,113 @@ async def _create_channel_via_telethon(client) -> Optional[int]:
 
 
 # ============================================================
+# BOT'NI STORAGE CHANNEL'GA A'ZO + ADMIN QILISH
+# ============================================================
+#
+# MUHIM ARXITEKTURA QOIDASI: Auto Reply/First Message source
+# xabarlari endi Bot API server-side `copyMessage` orqali
+# to'g'ridan-to'g'ri Storage Channel'ga nusxalanadi (Telethon
+# orqali botdan xabar "qidirish" ENDI ISHLATILMAYDI — bu
+# ishonchsiz bo'lib chiqdi). `copyMessage` broadcast kanalga
+# yozish uchun bot O'SHA KANALDA ADMIN (kamida "xabar joylash"
+# huquqi bilan) bo'lishi SHART — shu sabab botni admin qilish bu
+# arxitekturada ENDI TALAB.
+
+async def _ensure_bot_is_storage_admin(
+    client,
+    chat_id: int,
+) -> bool:
+    """
+    Bot Storage Channel'ga a'zo va admin (faqat `post_messages`
+    huquqi bilan) ekanligini ta'minlaydi.
+
+    Idempotent va xavfsiz: bot allaqachon a'zo bo'lsa
+    (`UserAlreadyParticipantError`), bu jim o'tkazib yuboriladi —
+    xatolik EMAS. Har chaqiruvda qayta tekshirilishi mumkin
+    (masalan eski, botsiz yaratilgan kanallarni "davolash" uchun).
+    """
+
+    try:
+        channel_entity = await client.get_entity(
+            PeerChannel(chat_id)
+        )
+    except Exception as exc:
+        logger.error(
+            "Storage channel: botni admin qilishda channel "
+            "entity topilmadi: %s: %s (chat_id=%s)",
+            type(exc).__name__,
+            exc,
+            chat_id,
+            exc_info=exc,
+        )
+        return False
+
+    try:
+        bot_entity = await client.get_entity(BOT_USERNAME)
+    except Exception as exc:
+        logger.error(
+            "Storage channel: bot entity topilmadi "
+            "(BOT_USERNAME=%s): %s: %s",
+            BOT_USERNAME,
+            type(exc).__name__,
+            exc,
+            exc_info=exc,
+        )
+        return False
+
+    try:
+        await client(
+            InviteToChannelRequest(
+                channel=channel_entity,
+                users=[bot_entity],
+            )
+        )
+    except UserAlreadyParticipantError:
+        pass
+    except Exception:
+        # MUHIM: bu bosqichdagi xatolik ALOHIDA fatal EMAS — bot
+        # allaqachon a'zo bo'lishi yoki kanal creator'i sifatida
+        # zaruriyat bo'lmasligi mumkin. Pastdagi admin qilish
+        # bosqichi haqiqiy tekshiruv hisoblanadi.
+        logger.warning(
+            "Storage channel: botni kanalga qo'shishda xatolik "
+            "(admin qilish baribir urinib ko'riladi): chat_id=%s",
+            chat_id,
+            exc_info=True,
+        )
+
+    try:
+        await client(
+            EditAdminRequest(
+                channel=channel_entity,
+                user_id=bot_entity,
+                admin_rights=ChatAdminRights(
+                    post_messages=True,
+                ),
+                rank="Storage",
+            )
+        )
+    except Exception as exc:
+        logger.error(
+            "Storage channel: botni admin qilishda xatolik: "
+            "%s: %s (chat_id=%s)",
+            type(exc).__name__,
+            exc,
+            chat_id,
+            exc_info=exc,
+        )
+        return False
+
+    logger.info(
+        "Storage channel: bot admin qilib tayinlandi "
+        "(post_messages huquqi bilan): chat_id=%s",
+        chat_id,
+    )
+
+    return True
+
+
+# ============================================================
 # MARKAZIY SERVIS: GET OR CREATE (Telethon health-check bilan)
 # ============================================================
 
@@ -210,6 +322,9 @@ async def get_or_create_user_storage_channel(
         if channel is None:
             return StorageChannelResult(ERROR, None)
 
+        if not await _ensure_bot_is_storage_admin(client, chat_id):
+            return StorageChannelResult(ERROR, None)
+
         logger.info(
             "Storage channel yaratildi: account_id=%s",
             telegram_account_id,
@@ -226,7 +341,17 @@ async def get_or_create_user_storage_channel(
     )
 
     if accessible:
-        # C)
+        # C) MUHIM: bot admin ekanligi HAR SAFAR qayta
+        # tekshiriladi/ta'minlanadi — bu shu arxitekturaga
+        # o'tishdan OLDIN yaratilgan (botsiz) eski Storage
+        # Channel'larni ham xavfsiz "davolaydi", DB'da hech
+        # qanday buzg'unchi/destruktiv migratsiyasiz.
+        if not await _ensure_bot_is_storage_admin(
+            client,
+            existing.chat_id,
+        ):
+            return StorageChannelResult(ERROR, None)
+
         return StorageChannelResult(READY, existing)
 
     # D) O'chirilgan/invalid — foydalanuvchi tasdig'i kerak.
@@ -324,11 +449,16 @@ async def recreate_user_storage_channel(
         chat_id=chat_id,
     )
 
-    if channel is not None:
-        logger.info(
-            "Storage channel qayta yaratildi: account_id=%s",
-            telegram_account_id,
-        )
+    if channel is None:
+        return None
+
+    if not await _ensure_bot_is_storage_admin(client, chat_id):
+        return None
+
+    logger.info(
+        "Storage channel qayta yaratildi: account_id=%s",
+        telegram_account_id,
+    )
 
     return channel
 
