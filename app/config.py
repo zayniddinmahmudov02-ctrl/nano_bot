@@ -175,6 +175,20 @@ try:
 except ValueError:
     PAYMENT_CHANNEL_ID = 0
 
+# To'lov qabul qilinadigan karta — MUHIM: bitta joydan
+# boshqariladi (config), kod ichida hech qayerda hardcode
+# qilinmaydi. .env orqali sozlanishi mumkin (ixtiyoriy),
+# sozlanmasa quyidagi standart qiymat ishlatiladi.
+PAYMENT_CARD_NUMBER = get_env(
+    "PAYMENT_CARD_NUMBER",
+    "9860350144907192",
+)
+
+PAYMENT_CARD_TYPE = get_env(
+    "PAYMENT_CARD_TYPE",
+    "Uz-Humo",
+)
+
 
 # =========================================================
 # APPLICATION

@@ -7,10 +7,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
+from app.config import PAYMENT_CARD_NUMBER, PAYMENT_CARD_TYPE
 from app.database import AsyncSessionLocal
 from app.keyboards.nano import (
     nano_activity_menu_keyboard,
-    nano_activity_package_keyboard,
     nano_activity_receipt_cancel_keyboard,
     nano_settings_menu_keyboard,
 )
@@ -146,12 +146,18 @@ async def nano_activity_menu(
 
 
 # ============================================================
-# PACKAGE DETAIL
+# PACKAGE DETAIL + TO'LOV MA'LUMOTLARI (bitta bosqich)
 # ============================================================
+#
+# MUHIM: paket tanlangan zahoti karta ma'lumotlari va chek
+# yuborish yo'riqnomasi bitta ekranda ko'rsatiladi — alohida
+# "Sotib olish" tasdiqlash bosqichi shart emas (spec: "paketni
+# tanlaydi -> karta orqali to'lov qiladi -> chek yuboradi").
 
 @router.callback_query(F.data.startswith("nano:activity:package:"))
 async def nano_activity_package_detail(
     callback: CallbackQuery,
+    state: FSMContext,
 ) -> None:
     if callback.from_user is None:
         await callback.answer()
@@ -175,6 +181,9 @@ async def nano_activity_package_detail(
         rate_snapshot.rate,
     )
 
+    await state.set_state(ActivityStates.waiting_receipt)
+    await state.update_data(package_key=package_key)
+
     await callback.answer()
 
     text = t(
@@ -183,48 +192,13 @@ async def nano_activity_package_detail(
         label=package.label_uz,
         usd=package.usd_price,
         uzs=_format_uzs(uzs_amount),
+        card_type=PAYMENT_CARD_TYPE,
+        card_number=PAYMENT_CARD_NUMBER,
     )
 
     await _safe_edit(
         callback,
         text,
-        nano_activity_package_keyboard(package_key, lang),
-    )
-
-
-# ============================================================
-# BUY (start receipt collection)
-# ============================================================
-
-@router.callback_query(F.data.startswith("nano:activity:buy:"))
-async def nano_activity_buy_start(
-    callback: CallbackQuery,
-    state: FSMContext,
-) -> None:
-    if callback.from_user is None:
-        await callback.answer()
-        return
-
-    package_key = callback.data.split(":")[-1]
-    package = get_package(package_key)
-
-    if package is None:
-        await callback.answer("❌ Xatolik.", show_alert=True)
-        return
-
-    telegram_id = int(callback.from_user.id)
-
-    async with AsyncSessionLocal() as session:
-        lang = await get_user_language(session, telegram_id)
-
-    await state.set_state(ActivityStates.waiting_receipt)
-    await state.update_data(package_key=package_key)
-
-    await callback.answer()
-
-    await _safe_edit(
-        callback,
-        t("activity_payment_instructions", lang),
         nano_activity_receipt_cancel_keyboard(lang),
     )
 
@@ -321,7 +295,11 @@ async def activity_receive_receipt(
     )
 
     await message.answer(
-        t("activity_request_sent", lang),
+        t(
+            "activity_receipt_received",
+            lang,
+            payment_id=payment_id,
+        ),
         reply_markup=nano_settings_menu_keyboard(lang),
     )
 

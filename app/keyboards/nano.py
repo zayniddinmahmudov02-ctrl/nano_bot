@@ -267,25 +267,6 @@ def nano_activity_menu_keyboard(
     )
 
 
-def nano_activity_package_keyboard(
-    package_key: str,
-    lang: str = DEFAULT_LANGUAGE,
-) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=t("btn_activity_buy", lang),
-                    callback_data=(
-                        f"nano:activity:buy:{package_key}"
-                    ),
-                ),
-            ],
-            _back("nano:activity", lang),
-        ]
-    )
-
-
 def nano_activity_receipt_cancel_keyboard(
     lang: str = DEFAULT_LANGUAGE,
 ) -> InlineKeyboardMarkup:
@@ -505,7 +486,6 @@ __all__ = [
     "nano_settings_menu_keyboard",
     "nano_language_keyboard",
     "nano_activity_menu_keyboard",
-    "nano_activity_package_keyboard",
     "nano_activity_receipt_cancel_keyboard",
     "nano_access_denied_keyboard",
     "nano_profile_keyboard",

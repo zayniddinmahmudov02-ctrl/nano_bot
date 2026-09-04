@@ -14,7 +14,11 @@ from aiogram.types import (
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import PAYMENT_CHANNEL_ID
+from app.config import (
+    PAYMENT_CARD_NUMBER,
+    PAYMENT_CARD_TYPE,
+    PAYMENT_CHANNEL_ID,
+)
 from app.database import AsyncSessionLocal
 from app.database.models import Payment, User
 from app.services.activity_service import grant_activity
@@ -116,9 +120,12 @@ def _build_request_caption(
         f"📦 Paket: {package.label_uz}\n"
         f"💵 USD: ${package.usd_price:.2f}\n"
         f"🇺🇿 UZS: ~{payment.uzs_amount:,.0f} so'm\n"
+        f"💳 {PAYMENT_CARD_TYPE}: "
+        f"<code>{PAYMENT_CARD_NUMBER}</code>\n\n"
         f"📅 Yuborilgan vaqt: "
         f"{sent_at:%d.%m.%Y %H:%M} UTC\n"
-        f"🧾 Payment ID: <code>{payment.payment_id}</code>"
+        f"🧾 Payment ID: <code>{payment.payment_id}</code>\n"
+        f"⏳ Status: {payment.status}"
     ).replace(",", " ")
 
 

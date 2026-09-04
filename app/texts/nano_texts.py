@@ -357,32 +357,51 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "1 year — $6",
         "de": "1 Jahr — $6",
     },
-    "btn_activity_buy": {
-        "uz": "💳 Sotib olish",
-        "ru": "💳 Купить",
-        "en": "💳 Buy",
-        "de": "💳 Kaufen",
-    },
     "activity_package_detail": {
-        "uz": "⚡ <b>{label}</b>\n\n💵 ${usd:.2f}\n"
-        "🇺🇿 ~{uzs} so'm",
-        "ru": "⚡ <b>{label}</b>\n\n💵 ${usd:.2f}\n"
-        "🇺🇿 ~{uzs} сум",
-        "en": "⚡ <b>{label}</b>\n\n💵 ${usd:.2f}\n"
-        "🇺🇿 ~{uzs} UZS",
-        "de": "⚡ <b>{label}</b>\n\n💵 ${usd:.2f}\n"
-        "🇺🇿 ~{uzs} UZS",
-    },
-    "activity_payment_instructions": {
-        "uz": "💳 <b>To'lovni amalga oshiring.</b>\n\n"
-        "📸 To'lov chekini/skrinshotini shu chatga yuboring.",
-        "ru": "💳 <b>Совершите оплату.</b>\n\n"
-        "📸 Отправьте чек/скриншот оплаты в этот чат.",
-        "en": "💳 <b>Complete the payment.</b>\n\n"
-        "📸 Send the payment receipt/screenshot in this chat.",
-        "de": "💳 <b>Zahlung abschließen.</b>\n\n"
-        "📸 Senden Sie den Zahlungsbeleg/Screenshot in diesen "
-        "Chat.",
+        "uz": "⚡ <b>FAOLLIK</b>\n\n"
+        "📦 {label} — ${usd:.2f}\n"
+        "🇺🇿 ~{uzs} so'm\n\n"
+        "💳 <b>To'lov uchun:</b>\n\n"
+        "🇺🇿 {card_type}\n"
+        "<code>{card_number}</code>\n\n"
+        "To'lovni amalga oshirgach, to'lov chekini yoki "
+        "skrinshotini shu yerga yuboring.\n\n"
+        "⏳ To'lovingiz bir necha daqiqada admin tomonidan "
+        "tekshiriladi va tasdiqlangach Faollik avtomatik "
+        "yoqiladi.",
+        "ru": "⚡ <b>АКТИВНОСТЬ</b>\n\n"
+        "📦 {label} — ${usd:.2f}\n"
+        "🇺🇿 ~{uzs} сум\n\n"
+        "💳 <b>Для оплаты:</b>\n\n"
+        "🇺🇿 {card_type}\n"
+        "<code>{card_number}</code>\n\n"
+        "После оплаты отправьте сюда чек или скриншот оплаты."
+        "\n\n"
+        "⏳ Ваш платёж будет проверен администратором в "
+        "течение нескольких минут, после чего Активность "
+        "включится автоматически.",
+        "en": "⚡ <b>ACTIVITY</b>\n\n"
+        "📦 {label} — ${usd:.2f}\n"
+        "🇺🇿 ~{uzs} UZS\n\n"
+        "💳 <b>Payment details:</b>\n\n"
+        "🇺🇿 {card_type}\n"
+        "<code>{card_number}</code>\n\n"
+        "After completing the payment, send the payment "
+        "receipt or screenshot here.\n\n"
+        "⏳ Your payment will be reviewed by an admin within a "
+        "few minutes, and Activity will be enabled "
+        "automatically once approved.",
+        "de": "⚡ <b>AKTIVITÄT</b>\n\n"
+        "📦 {label} — ${usd:.2f}\n"
+        "🇺🇿 ~{uzs} UZS\n\n"
+        "💳 <b>Zahlungsdetails:</b>\n\n"
+        "🇺🇿 {card_type}\n"
+        "<code>{card_number}</code>\n\n"
+        "Senden Sie nach der Zahlung den Zahlungsbeleg oder "
+        "Screenshot hierher.\n\n"
+        "⏳ Ihre Zahlung wird innerhalb weniger Minuten von "
+        "einem Admin geprüft und die Aktivität wird nach "
+        "Bestätigung automatisch aktiviert.",
     },
     "activity_receipt_invalid": {
         "uz": "❌ Iltimos, to'lov chekini rasm yoki hujjat "
@@ -394,51 +413,62 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "de": "❌ Bitte senden Sie den Zahlungsbeleg als Foto "
         "oder Dokument.",
     },
-    "activity_request_sent": {
-        "uz": "✅ <b>To'lov so'rovingiz yuborildi!</b>\n\n"
-        "⏳ Admin tekshirib chiqqach, Faollik "
-        "avtomatik yoqiladi. Iltimos kuting.",
-        "ru": "✅ <b>Ваш запрос на оплату отправлен!</b>\n\n"
-        "⏳ После проверки администратором Активность будет "
-        "включена автоматически. Пожалуйста, подождите.",
-        "en": "✅ <b>Your payment request has been sent!</b>\n\n"
-        "⏳ Once an admin reviews it, Activity will be enabled "
-        "automatically. Please wait.",
-        "de": "✅ <b>Ihre Zahlungsanfrage wurde gesendet!</b>\n\n"
-        "⏳ Nach Prüfung durch einen Admin wird die Aktivität "
-        "automatisch aktiviert. Bitte warten.",
+    "activity_receipt_received": {
+        "uz": "⏳ <b>To'lovingiz qabul qilindi.</b>\n\n"
+        "💳 Payment ID: <code>{payment_id}</code>\n\n"
+        "To'lovingiz bir necha daqiqada admin tomonidan "
+        "tekshiriladi.\n\n"
+        "Tasdiqlangandan so'ng Faollik avtomatik "
+        "faollashadi.",
+        "ru": "⏳ <b>Ваш платёж принят.</b>\n\n"
+        "💳 Payment ID: <code>{payment_id}</code>\n\n"
+        "Ваш платёж будет проверен администратором в "
+        "течение нескольких минут.\n\n"
+        "После подтверждения Активность включится "
+        "автоматически.",
+        "en": "⏳ <b>Your payment has been received.</b>\n\n"
+        "💳 Payment ID: <code>{payment_id}</code>\n\n"
+        "Your payment will be reviewed by an admin within a "
+        "few minutes.\n\n"
+        "Activity will be enabled automatically once "
+        "approved.",
+        "de": "⏳ <b>Ihre Zahlung wurde empfangen.</b>\n\n"
+        "💳 Payment ID: <code>{payment_id}</code>\n\n"
+        "Ihre Zahlung wird innerhalb weniger Minuten von "
+        "einem Admin geprüft.\n\n"
+        "Nach Bestätigung wird die Aktivität automatisch "
+        "aktiviert.",
     },
     "activity_approved_notification": {
-        "uz": "✅ <b>To'lovingiz tasdiqlandi!</b>\n\n"
+        "uz": "✅ <b>To'lov tasdiqlandi!</b>\n\n"
         "⚡ Faollik: {package}\n"
         "📅 Amal qilish muddati: {expiry}\n\n"
         "Botdan foydalanishingiz mumkin.",
-        "ru": "✅ <b>Ваш платёж подтверждён!</b>\n\n"
+        "ru": "✅ <b>Платёж подтверждён!</b>\n\n"
         "⚡ Активность: {package}\n"
         "📅 Действует до: {expiry}\n\n"
         "Вы можете пользоваться ботом.",
-        "en": "✅ <b>Your payment has been approved!</b>\n\n"
+        "en": "✅ <b>Payment confirmed!</b>\n\n"
         "⚡ Activity: {package}\n"
         "📅 Valid until: {expiry}\n\n"
         "You can now use the bot.",
-        "de": "✅ <b>Ihre Zahlung wurde bestätigt!</b>\n\n"
+        "de": "✅ <b>Zahlung bestätigt!</b>\n\n"
         "⚡ Aktivität: {package}\n"
         "📅 Gültig bis: {expiry}\n\n"
         "Sie können den Bot jetzt nutzen.",
     },
     "activity_rejected_notification": {
-        "uz": "❌ <b>To'lovingiz rad etildi.</b>\n\n"
-        "Savollar bo'lsa, qo'llab-quvvatlash bilan bog'laning "
-        "yoki to'lovni qayta yuboring.",
-        "ru": "❌ <b>Ваш платёж отклонён.</b>\n\n"
-        "Если есть вопросы, свяжитесь с поддержкой или "
-        "отправьте платёж повторно.",
-        "en": "❌ <b>Your payment was rejected.</b>\n\n"
-        "If you have questions, contact support or resend the "
-        "payment.",
-        "de": "❌ <b>Ihre Zahlung wurde abgelehnt.</b>\n\n"
-        "Bei Fragen wenden Sie sich an den Support oder senden "
-        "Sie die Zahlung erneut.",
+        "uz": "❌ <b>To'lov tasdiqlanmadi.</b>\n\n"
+        "Iltimos, to'lov ma'lumotlarini tekshirib, qayta "
+        "yuboring.",
+        "ru": "❌ <b>Платёж не подтверждён.</b>\n\n"
+        "Пожалуйста, проверьте данные оплаты и отправьте "
+        "повторно.",
+        "en": "❌ <b>Payment was not confirmed.</b>\n\n"
+        "Please check your payment details and resend it.",
+        "de": "❌ <b>Zahlung wurde nicht bestätigt.</b>\n\n"
+        "Bitte überprüfen Sie Ihre Zahlungsdaten und senden "
+        "Sie sie erneut.",
     },
     "access_denied_title": {
         "uz": "❌ <b>Faollik muddati tugagan.</b>\n\n"

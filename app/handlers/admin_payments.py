@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from aiogram import F, Router
@@ -67,16 +68,37 @@ def _parse_payment_id(callback_data: str) -> str:
     return callback_data.split(":", 2)[-1]
 
 
+_STATUS_LINE_PATTERN = re.compile(
+    r"⏳ Status: \w+"
+)
+
+
 async def _edit_channel_message(
     callback: CallbackQuery,
-    extra_line: str,
+    status_line: str,
 ) -> None:
+    """
+    Kanal kartasidagi "⏳ Status: PENDING" qatorini yangi
+    status bilan ALMASHTIRADI (spec 7/8-bo'lim: "channel message
+    statusi yangilanadi") — eski qatorlar ustiga qo'shib
+    yozilmaydi.
+    """
+
     try:
         original = callback.message.html_text or ""
     except Exception:
         original = ""
 
-    new_text = f"{original}\n\n{extra_line}" if original else extra_line
+    if _STATUS_LINE_PATTERN.search(original):
+        new_text = _STATUS_LINE_PATTERN.sub(
+            status_line,
+            original,
+        )
+    elif original:
+        # Eski (status qatorsiz) format uchun xavfsiz fallback.
+        new_text = f"{original}\n\n{status_line}"
+    else:
+        new_text = status_line
 
     try:
         if callback.message.photo or callback.message.document:
@@ -145,7 +167,8 @@ async def admin_payment_approve(callback: CallbackQuery) -> None:
 
     await _edit_channel_message(
         callback,
-        f"✅ TASDIQLANDI (admin: <code>{admin_telegram_id}</code>)",
+        "✅ Status: APPROVED "
+        f"(admin: <code>{admin_telegram_id}</code>)",
     )
 
     await record_security_event(
@@ -236,7 +259,8 @@ async def admin_payment_reject(callback: CallbackQuery) -> None:
 
     await _edit_channel_message(
         callback,
-        f"❌ RAD ETILDI (admin: <code>{admin_telegram_id}</code>)",
+        "❌ Status: REJECTED "
+        f"(admin: <code>{admin_telegram_id}</code>)",
     )
 
     await record_security_event(
