@@ -17,7 +17,7 @@ from app.services.terms_service import (
     get_terms_page,
 )
 from app.services.user_service import get_user_language
-from app.texts import t
+from app.texts import t, t_all
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,7 @@ async def _safe_edit(
 
 
 @router.message(Command("info"))
+@router.message(F.text.in_(t_all("btn_info")))
 async def info_command(
     message: Message,
     state: FSMContext,

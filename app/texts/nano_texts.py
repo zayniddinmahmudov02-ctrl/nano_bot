@@ -64,6 +64,18 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "❌ Not found.",
         "de": "❌ Nicht gefunden.",
     },
+    "menu_placeholder": {
+        "uz": "Menyudan tanlang...",
+        "ru": "Выберите из меню...",
+        "en": "Choose from menu...",
+        "de": "Aus dem Menü wählen...",
+    },
+    "language_updated_keyboard": {
+        "uz": "🌐 Pastki menyu paneli yangilandi.",
+        "ru": "🌐 Нижняя панель меню обновлена.",
+        "en": "🌐 The bottom menu panel has been updated.",
+        "de": "🌐 Das untere Menüpanel wurde aktualisiert.",
+    },
     "welcome_short": {
         "uz": "👋 <b>Nano-Bot</b>ga xush kelibsiz!\n\n"
         "🤖 Kerakli bo'limni pastdagi <b>Menu</b> tugmasi "
@@ -530,9 +542,34 @@ def t(
     return template
 
 
+def t_all(key: str) -> set:
+    """
+    Berilgan kalit uchun BARCHA (4 tilda) tarjima variantlarini
+    to'plam (set) sifatida qaytaradi.
+
+    MUHIM QO'LLANILISH: Reply-keyboard tugmalari matnga qarab
+    (F.text ==) aniqlanadi, lekin ba'zi yorliqlar tilga qarab
+    farq qiladi (masalan "Sozlamalar"/"Settings"/"Einstellungen").
+    Foydalanuvchi reply-keyboard tugmasini bosganda, uning
+    ekranidagi til handler ro'yxatdan o'tgan paytdagi tildan
+    farq qilishi mumkin emas — lekin xavfsizlik uchun handler
+    filtri BARCHA tillardagi variantni qabul qilishi kerak,
+    aks holda noto'g'ri tilda ro'yxatdan o'tgan foydalanuvchi
+    tugmasi ishlamay qoladi.
+    """
+
+    entry = _TEXTS.get(key)
+
+    if entry is None:
+        return {key}
+
+    return set(entry.values())
+
+
 __all__ = [
     "SUPPORTED_LANGUAGES",
     "DEFAULT_LANGUAGE",
     "LANGUAGE_LABELS",
     "t",
+    "t_all",
 ]

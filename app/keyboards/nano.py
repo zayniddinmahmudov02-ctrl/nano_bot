@@ -1,6 +1,50 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 from app.texts import DEFAULT_LANGUAGE, LANGUAGE_LABELS, SUPPORTED_LANGUAGES, t
+
+
+# ============================================================
+# ASOSIY MENU — Telegramning pastki (Reply) klaviatura paneli
+# ============================================================
+#
+# MUHIM: bu — CHAT ICHIGA yuborilgan alohida "menu message" ham,
+# ichki inline navigatsiya ham EMAS. Bu Telegramning o'zining
+# pastki klaviatura panelidagi doimiy tugmalar — yozish
+# maydonining tepasida (⌨️ belgisi orqali ochib-yopiladigan)
+# joyda ko'rinadi, xuddi so'ralgan referens (Vizu Bot) kabi.
+#
+# `resize_keyboard=True` — panel tugmalar soniga moslab
+# ixchamlashtiriladi.
+# `is_persistent=True` — panel doimiy ko'rinib turadi (Telegram
+# uni "yopilgan" holatda ham ⌨️ belgisi orqali darhol qayta
+# ochish imkonini beradi).
+
+def nano_main_reply_keyboard(
+    lang: str = DEFAULT_LANGUAGE,
+) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text=t("btn_agent", lang)),
+                KeyboardButton(text=t("btn_assistant", lang)),
+            ],
+            [
+                KeyboardButton(text=t("btn_settings", lang)),
+                KeyboardButton(text=t("btn_info", lang)),
+            ],
+            [
+                KeyboardButton(text=t("btn_referrals", lang)),
+            ],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder=t("menu_placeholder", lang),
+    )
 
 
 def _back(callback_data: str, lang: str) -> list:
@@ -390,6 +434,7 @@ def nano_stats_keyboard(
 
 
 __all__ = [
+    "nano_main_reply_keyboard",
     "nano_main_menu_keyboard",
     "nano_agent_menu_keyboard",
     "nano_assistant_menu_keyboard",

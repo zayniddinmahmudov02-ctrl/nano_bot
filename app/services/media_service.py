@@ -5,6 +5,7 @@ import logging
 from typing import Optional, Tuple
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramEntityTooLarge
 from aiogram.types import Message as BotMessage
 from telethon import TelegramClient
 from telethon.tl.types import PeerChannel
@@ -16,6 +17,9 @@ SUPPORTED_MESSAGE_TYPES = (
     "photo",
     "video",
     "document",
+    "audio",
+    "voice",
+    "animation",
 )
 
 
@@ -57,6 +61,30 @@ def detect_post_content(
             message.document.file_name,
         )
 
+    if message.audio:
+        return (
+            "audio",
+            message.caption,
+            message.audio.file_id,
+            message.audio.file_name,
+        )
+
+    if message.voice:
+        return (
+            "voice",
+            message.caption,
+            message.voice.file_id,
+            None,
+        )
+
+    if message.animation:
+        return (
+            "animation",
+            message.caption,
+            message.animation.file_id,
+            message.animation.file_name,
+        )
+
     if message.text:
         return (
             "text",
@@ -68,9 +96,35 @@ def detect_post_content(
     return None, None, None, None
 
 
+def is_part_of_media_group(message: BotMessage) -> bool:
+    """
+    Xabar albom (media group)ning bir qismimi — aniqlaydi.
+
+    MUHIM: hozirgi arxitektura Auto Reply/First Message uchun
+    bitta post = bitta storage_message_id saqlaydi. Albomning
+    faqat BIRINCHI kelgan elementi shu post sifatida saqlanadi
+    (xavfsiz individual-media fallback) — qolgan albom
+    elementlari e'tiborsiz qoldiriladi, xatolik chiqarilmaydi.
+    """
+
+    return bool(message.media_group_id)
+
+
 # ============================================================
 # DOWNLOAD FROM BOT API
 # ============================================================
+
+class StoragePostTooLarge(Exception):
+    """
+    Fayl Telegram Bot API orqali yuklab bo'lmaydigan darajada
+    katta (standart Cloud Bot API cheklovi — taxminan 20MB).
+
+    MUHIM: bu — Bot API'ning o'ziga xos cheklovi, Telethon
+    tarafidan emas. Handler shu xatolikni ushlab, foydalanuvchiga
+    tushunarli xabar berishi kerak (engine/servis darajasida
+    crash bo'lmasligi uchun).
+    """
+
 
 async def _download_bot_file(
     bot: Bot,
@@ -80,8 +134,16 @@ async def _download_bot_file(
     """
     Bot API file_id orqali faylni xotiraga yuklab oladi.
 
+    MUHIM: bu — Auto Reply/First Message uchun ASOSIY yuborish
+    yo'li EMAS (asosiy yuborish yo'li — Storage Channel'dan
+    Telethon orqali `send_stored_post`). Bu funksiya faqat BIR
+    MARTALIK "sozlash" bosqichida — foydalanuvchi postni bevosita
+    botga (Bot API orqali) yuborganda — ishlatiladi, chunki bu
+    holatda fayl faqat Bot API orqali keladi va boshqa yo'l yo'q.
+
     Diskka yozilmaydi — faqat Telethon'ga qayta yuborish uchun
-    vaqtinchalik xotirada ushlab turiladi.
+    vaqtinchalik xotirada (io.BytesIO) ushlab turiladi, PostgreSQL
+    yoki diskka hech qachon yozilmaydi.
     """
 
     try:
@@ -96,6 +158,12 @@ async def _download_bot_file(
         buffer.name = file_name or "file"
 
         return buffer
+
+    except TelegramEntityTooLarge:
+        logger.warning(
+            "Bot API fayl juda katta (yuklab bo'lmadi)."
+        )
+        raise StoragePostTooLarge() from None
 
     except Exception:
         logger.exception(
@@ -165,6 +233,12 @@ async def send_post_to_storage(
         )
 
         return int(sent.id)
+
+    except StoragePostTooLarge:
+        # Handlerga aniq xato turi sifatida uzatiladi — u yerda
+        # foydalanuvchiga tushunarli xabar ko'rsatiladi. Engine/
+        # servis darajasida crash bo'lmaydi.
+        raise
 
     except Exception:
         logger.exception(
@@ -247,7 +321,9 @@ async def send_stored_post(
 
 __all__ = [
     "SUPPORTED_MESSAGE_TYPES",
+    "StoragePostTooLarge",
     "detect_post_content",
+    "is_part_of_media_group",
     "send_post_to_storage",
     "send_stored_post",
 ]

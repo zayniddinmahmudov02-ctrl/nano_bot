@@ -33,7 +33,7 @@ from app.services.user_service import (
     get_user_by_telegram_id,
     get_user_language,
 )
-from app.texts import LANGUAGE_LABELS, t
+from app.texts import LANGUAGE_LABELS, t, t_all
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,7 @@ async def _safe_edit(
 # ============================================================
 
 @router.message(Command("settings"))
+@router.message(F.text.in_(t_all("btn_settings")))
 async def settings_command(
     message: Message,
     state: FSMContext,

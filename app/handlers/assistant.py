@@ -26,7 +26,7 @@ from app.services.youtube_downloader_service import (
     validate_url as validate_youtube_url,
 )
 from app.services.ytdlp_backend import is_ffmpeg_available
-from app.texts import t
+from app.texts import t, t_all
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ async def _safe_edit(
 
 
 @router.message(Command("assistant"))
+@router.message(F.text.in_(t_all("btn_assistant")))
 async def assistant_command(
     message: Message,
     state: FSMContext,

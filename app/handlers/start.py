@@ -15,6 +15,7 @@ from app.database.models import (
     User,
     UserSettings,
 )
+from app.keyboards.nano import nano_main_reply_keyboard
 from app.services.user_service import (
     get_or_create_user,
     get_user_language,
@@ -237,13 +238,13 @@ async def process_start(
                 )
 
         # -------------------------------------------------
-        # QISQA SALOMLASHUV (navigatsiya YO'Q)
+        # QISQA SALOMLASHUV + PASTKI MENU PANELI
         # -------------------------------------------------
-        # MUHIM: bu yerda chatga na katta InlineKeyboard, na
-        # ReplyKeyboardMarkup yuborilmaydi. Navigatsiya FAQAT
-        # Telegramning o'z pastki Menu tugmasi (Bot Commands)
-        # orqali amalga oshiriladi — u alohida, bot ishga
-        # tushganda `configure_bot_ui()` orqali sozlanadi.
+        # MUHIM: chatga katta inline "bosh menyu" xabari
+        # yuborilmaydi — faqat qisqa matn. Asosiy 5 bo'lim
+        # Telegramning o'z PASTKI (Reply) klaviatura panelida
+        # ko'rinadi — bu chat ichidagi alohida xabar emas,
+        # Telegram interfeysining o'zi.
 
         async with AsyncSessionLocal() as session:
             lang = await get_user_language(
@@ -253,6 +254,7 @@ async def process_start(
 
         await message.answer(
             t("welcome_short", lang),
+            reply_markup=nano_main_reply_keyboard(lang),
         )
 
     except Exception:

@@ -25,6 +25,7 @@ from app.keyboards.auto_reply import (
 )
 from app.keyboards.main import main_menu_keyboard
 from app.services.media_service import (
+    StoragePostTooLarge,
     detect_post_content,
     send_post_to_storage,
 )
@@ -52,8 +53,23 @@ MESSAGE_TYPE_LABELS = {
     "photo": "🖼 Rasm",
     "video": "🎥 Video",
     "document": "📄 Hujjat",
+    "audio": "🎵 Audio",
+    "voice": "🎤 Ovozli xabar",
+    "animation": "🎬 GIF",
     "link": "🔗 Link",
 }
+
+UNSUPPORTED_POST_TYPE_TEXT = (
+    "❌ Qo‘llab-quvvatlanmaydigan post turi.\n\n"
+    "Matn, rasm, video, hujjat, audio, ovozli xabar yoki "
+    "GIF yuboring."
+)
+
+TOO_LARGE_TEXT = (
+    "❌ Fayl juda katta.\n\n"
+    "Telegram Bot API orqali yuklab bo‘lmaydigan hajmda "
+    "(taxminan 20MB dan katta). Kichikroq fayl yuboring."
+)
 
 
 # ============================================================
@@ -486,10 +502,7 @@ async def receive_post(
     )
 
     if message_type is None:
-        await message.answer(
-            "❌ Qo‘llab-quvvatlanmaydigan post turi.\n\n"
-            "Matn, rasm, video yoki hujjat yuboring."
-        )
+        await message.answer(UNSUPPORTED_POST_TYPE_TEXT)
         return
 
     telegram_id = int(message.from_user.id)
@@ -578,15 +591,20 @@ async def receive_post(
         )
         return
 
-    storage_message_id = await send_post_to_storage(
-        bot=message.bot,
-        telethon_client=telethon_client,
-        storage_chat_id=storage_channel.chat_id,
-        message_type=message_type,
-        text=text,
-        file_id=file_id,
-        file_name=file_name,
-    )
+    try:
+        storage_message_id = await send_post_to_storage(
+            bot=message.bot,
+            telethon_client=telethon_client,
+            storage_chat_id=storage_channel.chat_id,
+            message_type=message_type,
+            text=text,
+            file_id=file_id,
+            file_name=file_name,
+        )
+    except StoragePostTooLarge:
+        await state.clear()
+        await message.answer(TOO_LARGE_TEXT)
+        return
 
     if storage_message_id is None:
         await message.answer(
@@ -1530,10 +1548,7 @@ async def ar_receive_edit_post(
     )
 
     if message_type is None:
-        await message.answer(
-            "❌ Qo‘llab-quvvatlanmaydigan post turi.\n\n"
-            "Matn, rasm, video yoki hujjat yuboring."
-        )
+        await message.answer(UNSUPPORTED_POST_TYPE_TEXT)
         return
 
     telegram_id = int(message.from_user.id)
@@ -1597,15 +1612,20 @@ async def ar_receive_edit_post(
         )
         return
 
-    storage_message_id = await send_post_to_storage(
-        bot=message.bot,
-        telethon_client=telethon_client,
-        storage_chat_id=storage_channel.chat_id,
-        message_type=message_type,
-        text=text,
-        file_id=file_id,
-        file_name=file_name,
-    )
+    try:
+        storage_message_id = await send_post_to_storage(
+            bot=message.bot,
+            telethon_client=telethon_client,
+            storage_chat_id=storage_channel.chat_id,
+            message_type=message_type,
+            text=text,
+            file_id=file_id,
+            file_name=file_name,
+        )
+    except StoragePostTooLarge:
+        await state.clear()
+        await message.answer(TOO_LARGE_TEXT)
+        return
 
     if storage_message_id is None:
         await message.answer(

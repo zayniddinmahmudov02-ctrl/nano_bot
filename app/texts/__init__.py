@@ -3,6 +3,7 @@ from app.texts.nano_texts import (
     LANGUAGE_LABELS,
     SUPPORTED_LANGUAGES,
     t,
+    t_all,
 )
 
 __all__ = [
@@ -10,4 +11,5 @@ __all__ = [
     "LANGUAGE_LABELS",
     "SUPPORTED_LANGUAGES",
     "t",
+    "t_all",
 ]

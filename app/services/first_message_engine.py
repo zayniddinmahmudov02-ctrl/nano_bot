@@ -196,12 +196,21 @@ class FirstMessageEngine:
                     target_chat_id=target_chat_id,
                 )
 
-            # Legacy fallback: eski file_id asosidagi yozuvlar
-            # uchun eng yaxshi urinish (Storage Channel'ga hali
-            # ko'chirilmagan eski ma'lumotlar).
+            # MUHIM: bu yerga faqat Storage Channel'ga hali
+            # ko'chirilmagan ESKI (legacy) yozuvlar tushadi
+            # (storage_chat_id/storage_message_id yo'q).
+            #
+            # Eski yozuvlarda saqlangan file_id — Telegram Bot
+            # API file_id, Telethon uchun yaroqsiz. Uni
+            # client.send_file()'ga to'g'ridan-to'g'ri uzatish
+            # doimo:
+            #   ValueError: Failed to convert ... to media
+            # xatosiga olib keladi. Shu sababli bunday urinish
+            # butunlay OLIB TASHLANDI — matn bo'lsa xavfsiz
+            # yuboriladi, media bo'lsa xavfsiz "skip" qilinadi
+            # va logga yoziladi.
             message_type = first_message["message_type"]
             text = first_message["text"]
-            file_id = first_message["file_id"]
 
             if message_type == "text":
                 if not text:
@@ -213,14 +222,13 @@ class FirstMessageEngine:
                 )
                 return True
 
-            if file_id:
-                await client.send_file(
-                    target_chat_id,
-                    file_id,
-                    caption=text or None,
-                )
-                return True
-
+            logger.warning(
+                "Legacy First Message (id=%s) uchun Storage "
+                "reference topilmadi — eski Bot API file_id "
+                "Telethon orqali yuborilmaydi. First Message'ni "
+                "tahrirlash orqali qayta saqlang.",
+                first_message.get("id"),
+            )
             return False
 
         except Exception:

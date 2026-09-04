@@ -16,7 +16,7 @@ from app.services.user_service import (
     get_user_by_telegram_id,
     get_user_language,
 )
-from app.texts import t
+from app.texts import t, t_all
 
 from ..keyboards.main import main_menu_keyboard
 from ..keyboards.referral import (
@@ -179,7 +179,13 @@ async def apply_referral(
     return True
 
 
-@router.message(F.text == "👥 Referallar")
+# MUHIM: bu funksiyaning eski F.text == "👥 Referallar" trigeri
+# OLIB TASHLANDI — u endi yangi pastki Reply-menu panelidagi
+# "👥 Referallar" tugmasi bilan TO'QNASHAR edi (ikkalasi ham
+# xuddi shu matn), va eski, kamroq to'liq bo'lgan ekranni
+# ko'rsatib, hattoki asosiy panelni almashtirib yuborardi.
+# Yangi, to'liq inline ekran uchun pastdagi
+# `referrals_command`/`nano_referrals_menu`ga qarang.
 async def referral_menu(
     message: Message,
 ) -> None:
@@ -468,6 +474,7 @@ async def _render_referrals_text(
 
 
 @router.message(Command("referrals"))
+@router.message(F.text.in_(t_all("btn_referrals")))
 async def referrals_command(
     message: Message,
     state: FSMContext,
