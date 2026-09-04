@@ -892,8 +892,13 @@ async def _post_connect_setup(
             telegram_account_id=telegram_account_id,
         )
 
-        await auto_reply_engine.start_for_user(db_user_id)
+        # MUHIM (tartib qat'iy!): Telethon bir client'ga
+        # ro'yxatdan o'tgan handler'larni REGISTRATSIYA
+        # TARTIBIDA, ketma-ket chaqiradi (qarang: app/main.py
+        # dagi izoh) — shu sabab First Message har doim Auto
+        # Reply'dan OLDIN ishga tushirilishi kerak.
         await first_message_engine.start_for_user(db_user_id)
+        await auto_reply_engine.start_for_user(db_user_id)
 
     except Exception:
         logger.exception(

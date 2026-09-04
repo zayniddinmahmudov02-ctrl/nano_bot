@@ -348,6 +348,40 @@ async def startup(bot: Bot) -> None:
         )
 
     # --------------------------------------------------------
+    # FIRST MESSAGE ENGINE
+    # --------------------------------------------------------
+    # MUHIM (tartib qat'iy!): Telethon bir xil client'ga
+    # ro'yxatdan o'tgan bir nechta event handler'larni REGISTRATSIYA
+    # TARTIBIDA, KETMA-KET (`await callback(event)`, sinxron —
+    # navbatdagi handler oldingisi to'liq tugagunicha
+    # boshlanmaydi) chaqiradi — bu Telethon kutubxonasining o'z
+    # dispatch mexanizmi (`_dispatch_update`), taxmin emas.
+    #
+    # Shu sababli First Message Engine'ning listeneri Auto Reply
+    # Engine'nikidan OLDIN ro'yxatdan o'tkazilishi SHART: shunda
+    # bitta kiruvchi xabarga ikkalasi ham mos kelsa, foydalanuvchi
+    # avval "birinchi xabar"ni, undan KEYIN kalit so'zga bog'langan
+    # Auto Reply xabarini oladi — hech qachon aksincha emas va
+    # hech qachon ikkalasi bir vaqtda (race) yuborilmaydi.
+    #
+    # BU TARTIBNI O'ZGARTIRMANG — pastdagi Auto Reply Engine
+    # bo'limi doim shu bo'limdan KEYIN kelishi kerak (xuddi shu
+    # qoida app/handlers/telegram_connect.py'dagi
+    # `_post_connect_setup()`da ham qo'llanilgan).
+
+    try:
+        await first_message_engine.start()
+
+        logger.info(
+            "First Message Engine ishga tushdi."
+        )
+
+    except Exception:
+        logger.exception(
+            "First Message Engine ishga tushmadi."
+        )
+
+    # --------------------------------------------------------
     # AUTO REPLY ENGINE
     # --------------------------------------------------------
 
@@ -361,22 +395,6 @@ async def startup(bot: Bot) -> None:
     except Exception:
         logger.exception(
             "Auto Reply Engine ishga tushmadi."
-        )
-
-    # --------------------------------------------------------
-    # FIRST MESSAGE ENGINE
-    # --------------------------------------------------------
-
-    try:
-        await first_message_engine.start()
-
-        logger.info(
-            "First Message Engine ishga tushdi."
-        )
-
-    except Exception:
-        logger.exception(
-            "First Message Engine ishga tushmadi."
         )
 
     # --------------------------------------------------------
