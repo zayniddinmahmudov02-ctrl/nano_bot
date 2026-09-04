@@ -280,7 +280,11 @@ async def receive_first_message(
     fm_chat_id = data.get("fm_chat_id")
     fm_message_id = data.get("fm_message_id")
 
-    message_type, text, file_id, file_name = (
+    # MUHIM: `file_id`/`file_name` endi ishlatilmaydi — Storage
+    # Channel'ga saqlash Telethon (MTProto) orqali, xuddi shu
+    # Bot API `message_id` asosida amalga oshadi (Bot API
+    # `file_id`/yuklab olish endi umuman kerak emas).
+    message_type, text, _file_id, _file_name = (
         detect_post_content(message)
     )
 
@@ -362,13 +366,10 @@ async def receive_first_message(
 
     try:
         storage_message_id = await send_post_to_storage(
-            bot=message.bot,
             telethon_client=telethon_client,
             storage_chat_id=storage_channel.chat_id,
-            message_type=message_type,
-            text=text,
-            file_id=file_id,
-            file_name=file_name,
+            source_message_id=message.message_id,
+            fallback_text=text,
         )
     except StoragePostTooLarge:
         await state.clear()
@@ -525,7 +526,11 @@ async def receive_edit_first_message(
     fm_chat_id = data.get("fm_chat_id")
     fm_message_id = data.get("fm_message_id")
 
-    message_type, text, file_id, file_name = (
+    # MUHIM: `file_id`/`file_name` endi ishlatilmaydi — Storage
+    # Channel'ga saqlash Telethon (MTProto) orqali, xuddi shu
+    # Bot API `message_id` asosida amalga oshadi (Bot API
+    # `file_id`/yuklab olish endi umuman kerak emas).
+    message_type, text, _file_id, _file_name = (
         detect_post_content(message)
     )
 
@@ -606,13 +611,10 @@ async def receive_edit_first_message(
 
     try:
         storage_message_id = await send_post_to_storage(
-            bot=message.bot,
             telethon_client=telethon_client,
             storage_chat_id=storage_channel.chat_id,
-            message_type=message_type,
-            text=text,
-            file_id=file_id,
-            file_name=file_name,
+            source_message_id=message.message_id,
+            fallback_text=text,
         )
     except StoragePostTooLarge:
         await state.clear()

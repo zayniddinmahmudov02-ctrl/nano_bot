@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import io
 import logging
 from typing import Optional, Tuple
 
-from aiogram import Bot
-from aiogram.exceptions import TelegramEntityTooLarge
 from aiogram.types import Message as BotMessage
 from telethon import TelegramClient
-from telethon.tl.types import PeerChannel
+from telethon.errors import RPCError
+from telethon.tl.types import MessageMediaWebPage, PeerChannel
+
+from app.config import BOT_USERNAME
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +24,25 @@ SUPPORTED_MESSAGE_TYPES = (
 
 
 # ============================================================
-# DETECT INCOMING POST CONTENT (Bot API side)
+# DETECT INCOMING POST CONTENT (Bot API side — faqat TUR
+# aniqlash va UI uchun, hech qachon fayl yuklab olish uchun
+# ISHLATILMAYDI)
 # ============================================================
 
 def detect_post_content(
     message: BotMessage,
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """
-    aiogram Message'dan post turini aniqlaydi.
+    aiogram Message'dan post TURINI va caption/textini aniqlaydi.
+
+    MUHIM: bu funksiya faqat UI (qo'llab-quvvatlanmaydigan
+    turlarni erta rad etish, "message_type" ustunini DB'ga
+    yozish) uchun ishlatiladi. Qaytarilgan `file_id` ENDI
+    Storage Channel'ga saqlash uchun ISHLATILMAYDI (pastdagi
+    `send_post_to_storage`ga qarang) — Bot API'ning ~20MB
+    yuklab olish chegarasidan butunlay qochish uchun asosiy
+    saqlash yo'li endi Telethon (foydalanuvchi akkaunti,
+    MTProto) orqali ishlaydi.
 
     Qaytaradi:
     (message_type, text_or_caption, file_id, file_name)
@@ -110,135 +121,150 @@ def is_part_of_media_group(message: BotMessage) -> bool:
     return bool(message.media_group_id)
 
 
-# ============================================================
-# DOWNLOAD FROM BOT API
-# ============================================================
-
 class StoragePostTooLarge(Exception):
     """
-    Fayl Telegram Bot API orqali yuklab bo'lmaydigan darajada
-    katta (standart Cloud Bot API cheklovi — taxminan 20MB).
+    Fayl Telegram MTProto (Telethon) orqali ham nusxalab
+    bo'lmaydigan darajada katta yoki Telegram serveri fayl
+    qismlarini rad etdi.
 
-    MUHIM: bu — Bot API'ning o'ziga xos cheklovi, Telethon
-    tarafidan emas. Handler shu xatolikni ushlab, foydalanuvchiga
-    tushunarli xabar berishi kerak (engine/servis darajasida
-    crash bo'lmasligi uchun).
+    MUHIM: bu ENDI Bot API cheklovi emas — asosiy saqlash yo'li
+    (pastga qarang) hech qachon Bot API orqali fayl yuklab
+    olmaydi, shu sabab standart ~20MB Bot API chegarasi
+    umuman qo'llanilmaydi. Bu faqat Telegram MTProto darajasidagi
+    (juda kam uchraydigan) o'ta katta fayl xatosi uchun xavfsizlik
+    to'ri sifatida saqlanadi.
     """
-
-
-async def _download_bot_file(
-    bot: Bot,
-    file_id: str,
-    file_name: Optional[str],
-) -> Optional[io.BytesIO]:
-    """
-    Bot API file_id orqali faylni xotiraga yuklab oladi.
-
-    MUHIM: bu — Auto Reply/First Message uchun ASOSIY yuborish
-    yo'li EMAS (asosiy yuborish yo'li — Storage Channel'dan
-    Telethon orqali `send_stored_post`). Bu funksiya faqat BIR
-    MARTALIK "sozlash" bosqichida — foydalanuvchi postni bevosita
-    botga (Bot API orqali) yuborganda — ishlatiladi, chunki bu
-    holatda fayl faqat Bot API orqali keladi va boshqa yo'l yo'q.
-
-    Diskka yozilmaydi — faqat Telethon'ga qayta yuborish uchun
-    vaqtinchalik xotirada (io.BytesIO) ushlab turiladi, PostgreSQL
-    yoki diskka hech qachon yozilmaydi.
-    """
-
-    try:
-        buffer = io.BytesIO()
-
-        await bot.download(
-            file_id,
-            destination=buffer,
-        )
-
-        buffer.seek(0)
-        buffer.name = file_name or "file"
-
-        return buffer
-
-    except TelegramEntityTooLarge:
-        logger.warning(
-            "Bot API fayl juda katta (yuklab bo'lmadi)."
-        )
-        raise StoragePostTooLarge() from None
-
-    except Exception:
-        logger.exception(
-            "Bot API fayl yuklab olinmadi."
-        )
-        return None
 
 
 # ============================================================
-# SAVE POST TO STORAGE CHANNEL
+# ASOSIY OQIM: Telethon (MTProto) orqali source xabarni topish
 # ============================================================
+#
+# MUHIM ARXITEKTURA QOIDASI:
+# Foydalanuvchi Auto Reply/First Message uchun postni BOTGA
+# (Bot API orqali) yuboradi — lekin shu XABAR aslida foydalanuvchi
+# akkauntining o'zi va bot o'rtasidagi ODDIY Telegram chati (bot —
+# MTProto nuqtai nazaridan oddiy "user" hisoblanadi). Shu sababli
+# foydalanuvchining ALLAQACHON ULANGAN Telethon sessiyasi xuddi
+# shu xabarni — xuddi shu `message_id` bilan — MTProto orqali
+# to'g'ridan-to'g'ri o'qiy oladi, Bot API'ning `getFile`/
+# `bot.download()` yuklab olish yo'lidan (va uning ~20MB
+# chegarasidan) BUTUNLAY qochib.
+#
+# Telegram'ning bitta chatdagi xabar ID'lari BOT API va MTProto
+# o'rtasida BIR XIL raqamlash tizimiga ega (ikkalasi ham bitta
+# server ma'lumotlariga turli "ko'rinish" xolos) — shu sabab
+# `message.message_id` (aiogram) === source_message.id (Telethon)
+# aynan bitta chat uchun.
+#
+# Fayl BAYTLARINING o'zi bu jarayonda HECH QACHON qayta yuklab
+# olinmaydi/qayta yuklanmaydi: `send_file(entity, existing_media)`
+# faqat Telegram serverining o'ziga "shu allaqachon serverda
+# turgan faylni boshqa chatga ham joylashtir" deb ko'rsatma
+# beradi — shu sabab hatto juda katta fayllar uchun ham hech
+# qanday amaliy hajm chegarasi yo'q.
+
+async def _fetch_bot_chat_message(
+    telethon_client: TelegramClient,
+    message_id: int,
+):
+    """
+    Foydalanuvchi va bot o'rtasidagi chatdan, xuddi shu
+    `message_id`ga ega xabarni Telethon orqali oladi.
+    """
+
+    bot_entity = await telethon_client.get_entity(BOT_USERNAME)
+
+    return await telethon_client.get_messages(
+        bot_entity,
+        ids=message_id,
+    )
+
 
 async def send_post_to_storage(
     *,
-    bot: Bot,
     telethon_client: TelegramClient,
     storage_chat_id: int,
-    message_type: str,
-    text: Optional[str],
-    file_id: Optional[str],
-    file_name: Optional[str] = None,
+    source_message_id: int,
+    fallback_text: Optional[str] = None,
 ) -> Optional[int]:
     """
-    Postni foydalanuvchining Storage Channel'iga Telethon orqali
-    joylaydi va yuborilgan xabar id'sini qaytaradi.
+    Foydalanuvchi botga yuborgan postni (Bot API `message_id`si
+    orqali) Telethon (MTProto) yordamida topadi va uni
+    foydalanuvchining Storage Channel'iga — Bot API'dan
+    BUTUNLAY mustaqil ravishda — joylaydi.
+
+    Qaytaradi: Storage Channel'dagi yangi xabar ID'si, yoki
+    xatolik/topilmasa None.
+
+    MUHIM: `MessageMediaWebPage` (foydalanuvchi shunchaki link
+    yuborganda, Telegram avtomatik qo'shadigan URL preview)
+    HAQIQIY MEDIA EMAS — `send_file()`ga uzatilmaydi, aks holda
+    xatolik beradi. Bunday holatda va oddiy matn xabarlarida
+    postning matni oddiy text xabar sifatida yuboriladi.
     """
 
     try:
-        entity = await telethon_client.get_entity(
+        storage_entity = await telethon_client.get_entity(
             PeerChannel(storage_chat_id)
         )
 
-        if message_type == "text":
-            if not text:
-                return None
+        source_message = await _fetch_bot_chat_message(
+            telethon_client,
+            source_message_id,
+        )
 
-            sent = await telethon_client.send_message(
-                entity,
-                text,
+        if source_message is None or source_message.id is None:
+            logger.warning(
+                "Source xabar Telethon orqali topilmadi: "
+                "message_id=%s",
+                source_message_id,
+            )
+            return None
+
+        has_real_media = (
+            source_message.media is not None
+            and not isinstance(
+                source_message.media, MessageMediaWebPage
+            )
+        )
+
+        if has_real_media:
+            sent = await telethon_client.send_file(
+                storage_entity,
+                source_message.media,
+                caption=source_message.message or None,
             )
 
             return int(sent.id)
 
-        if message_type not in SUPPORTED_MESSAGE_TYPES:
+        text = source_message.message or fallback_text
+
+        if not text:
             logger.warning(
-                "Noma'lum post turi: %s",
-                message_type,
+                "Source xabarda na media, na matn topildi: "
+                "message_id=%s",
+                source_message_id,
             )
             return None
 
-        if not file_id:
-            return None
-
-        buffer = await _download_bot_file(
-            bot,
-            file_id,
-            file_name,
-        )
-
-        if buffer is None:
-            return None
-
-        sent = await telethon_client.send_file(
-            entity,
-            buffer,
-            caption=text or None,
+        sent = await telethon_client.send_message(
+            storage_entity,
+            text,
         )
 
         return int(sent.id)
 
-    except StoragePostTooLarge:
-        # Handlerga aniq xato turi sifatida uzatiladi — u yerda
-        # foydalanuvchiga tushunarli xabar ko'rsatiladi. Engine/
-        # servis darajasida crash bo'lmaydi.
-        raise
+    except RPCError:
+        # MUHIM: Telegram serveridan qaytgan RPC xatosi (masalan
+        # o'ta katta/buzilgan fayl qismlari) — foydalanuvchiga
+        # tushunarli xabar berish uchun aniq turga o'giriladi.
+        logger.exception(
+            "Storage kanaliga post joylashda Telegram RPC "
+            "xatosi: chat_id=%s",
+            storage_chat_id,
+        )
+        raise StoragePostTooLarge() from None
 
     except Exception:
         logger.exception(
@@ -286,7 +312,14 @@ async def send_stored_post(
             )
             return False
 
-        if stored_message.media:
+        has_real_media = (
+            stored_message.media is not None
+            and not isinstance(
+                stored_message.media, MessageMediaWebPage
+            )
+        )
+
+        if has_real_media:
             await telethon_client.send_file(
                 target_chat_id,
                 stored_message.media,
