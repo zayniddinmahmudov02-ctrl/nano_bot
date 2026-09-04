@@ -172,6 +172,60 @@ async def run_manual_migrations() -> None:
         "ON payments (status)",
         "CREATE INDEX IF NOT EXISTS ix_payments_telegram_id "
         "ON payments (telegram_id)",
+        # ------------------------------------------------------
+        # STATISTICS — "people_replied" NOT NULL xatosi tuzatildi
+        # ------------------------------------------------------
+        # MUHIM: serverdagi haqiqiy `statistics` jadvalida ORM
+        # modeli bilmaydigan, eski/orphaned `people_replied`
+        # ustuni mavjud (NOT NULL, DEFAULT'siz) — bu joriy kod
+        # hech qachon `people_replied`ga yozmaydi (butun loyihada
+        # faqat `replied_people` ishlatiladi), shu sabab har bir
+        # yangi INSERT
+        #   NotNullViolationError: null value in column
+        #   "people_replied" of relation "statistics"
+        # xatosi bilan yiqilardi.
+        #
+        # Yechim: agar `people_replied` ustuni mavjud bo'lsa,
+        # unga xavfsiz DEFAULT 0 beriladi — shunda uni INSERT
+        # ro'yxatida ko'rsatmagan har qanday so'rov ham (jumladan
+        # ORM'ning o'zi) avtomatik 0 bilan to'ldiriladi.
+        # MAVJUD QATORLAR VA ULARNING QIYMATLARI BUTUNLAY
+        # BUZILMAYDI — faqat DEFAULT o'rnatiladi, DROP/RENAME
+        # yo'q. Ustun mavjud bo'lmasa (masalan yangi/toza DB) —
+        # shartli tekshiruv tufayli hech narsa qilinmaydi, xato
+        # chiqmaydi.
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'statistics'
+                  AND column_name = 'people_replied'
+            ) THEN
+                ALTER TABLE statistics
+                    ALTER COLUMN people_replied SET DEFAULT 0;
+            END IF;
+        END $$;
+        """,
+        # Modelning o'zi ishlatadigan ustunlar uchun ham
+        # server-side DEFAULT — Python darajasidagi
+        # `default=0`ga qo'shimcha himoya qatlami (ORM'dan
+        # tashqari har qanday INSERT yo'li uchun ham xavfsiz).
+        "ALTER TABLE statistics "
+        "ADD COLUMN IF NOT EXISTS replied_people "
+        "INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE statistics "
+        "ADD COLUMN IF NOT EXISTS auto_replies "
+        "INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE statistics "
+        "ADD COLUMN IF NOT EXISTS first_messages_sent "
+        "INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE statistics "
+        "ALTER COLUMN replied_people SET DEFAULT 0",
+        "ALTER TABLE statistics "
+        "ALTER COLUMN auto_replies SET DEFAULT 0",
+        "ALTER TABLE statistics "
+        "ALTER COLUMN first_messages_sent SET DEFAULT 0",
     ]
 
     try:

@@ -41,87 +41,119 @@ async def initialize_user_data(user: User) -> None:
       trial berilmaydi).
     - Referral (eski, endi UI'da ko'rinmaydigan tizim uchun —
       mavjud ma'lumot tuzilishini buzmaslik uchun saqlanadi)
+
+    MUHIM (SQLAlchemy autoflush): agar bir nechta yangi obyekt
+    `session.add()` qilingandan keyin ORQASIDAN boshqa
+    `session.execute(select(...))` chaqirilsa, SQLAlchemy
+    avtomatik ravishda BARCHA kutilayotgan (pending) insertlarni
+    OLDINDAN flush qiladi ("autoflush"). Agar shu pending
+    insertlardan BIRI DB darajasida xato bersa (masalan NOT NULL
+    cheklovi), xatolik KEYINGI, aslida aloqasi yo'q so'rov
+    chaqiruvida ko'tariladi — bu diagnostikani chalkashtiradi
+    (masalan Statistics insert xatosi "Referral so'rovida"
+    ko'ringandek bo'ladi). Shu sabab har bir `session.add()`dan
+    KEYIN darhol `session.flush()` chaqiriladi — shunda har bir
+    xatolik aynan qaysi obyekt sabab bo'lganini aniq ko'rsatadi.
     """
 
     async with AsyncSessionLocal() as session:
+        try:
+            # -------------------------------------------------
+            # USER SETTINGS
+            # -------------------------------------------------
 
-        # -------------------------------------------------
-        # USER SETTINGS
-        # -------------------------------------------------
-
-        result = await session.execute(
-            select(UserSettings).where(
-                UserSettings.user_id == user.id
-            )
-        )
-
-        settings = result.scalar_one_or_none()
-
-        if settings is None:
-            settings = UserSettings(
-                user_id=user.id,
-                language=user.language or "uz",
-                notifications_enabled=True,
+            result = await session.execute(
+                select(UserSettings).where(
+                    UserSettings.user_id == user.id
+                )
             )
 
-            session.add(settings)
+            settings = result.scalar_one_or_none()
 
-        # -------------------------------------------------
-        # STATISTICS
-        # -------------------------------------------------
+            if settings is None:
+                settings = UserSettings(
+                    user_id=user.id,
+                    language=user.language or "uz",
+                    notifications_enabled=True,
+                )
 
-        result = await session.execute(
-            select(Statistics).where(
-                Statistics.user_id == user.id
-            )
-        )
+                session.add(settings)
+                await session.flush()
 
-        statistics = result.scalar_one_or_none()
+            # -------------------------------------------------
+            # STATISTICS
+            # -------------------------------------------------
 
-        if statistics is None:
-            statistics = Statistics(
-                user_id=user.id,
-                replied_people=0,
-                auto_replies=0,
-                first_messages_sent=0,
-            )
-
-            session.add(statistics)
-
-        # -------------------------------------------------
-        # REFERRAL
-        # -------------------------------------------------
-
-        result = await session.execute(
-            select(Referral).where(
-                Referral.user_id == user.id
-            )
-        )
-
-        referral = result.scalar_one_or_none()
-
-        if referral is None:
-            referral = Referral(
-                user_id=user.id,
-                referral_code=f"nano_{user.telegram_id}",
-                referral_count=0,
+            result = await session.execute(
+                select(Statistics).where(
+                    Statistics.user_id == user.id
+                )
             )
 
-            session.add(referral)
+            statistics = result.scalar_one_or_none()
 
-        await session.flush()
+            if statistics is None:
+                statistics = Statistics(
+                    user_id=user.id,
+                    replied_people=0,
+                    auto_replies=0,
+                    first_messages_sent=0,
+                )
 
-        # -------------------------------------------------
-        # SUBSCRIPTION (FAOLLIK) + 7 KUNLIK TRIAL
-        # -------------------------------------------------
+                session.add(statistics)
+                await session.flush()
 
-        await get_or_create_subscription(session, user.id)
+            # -------------------------------------------------
+            # REFERRAL
+            # -------------------------------------------------
 
-        # -------------------------------------------------
-        # SAVE
-        # -------------------------------------------------
+            result = await session.execute(
+                select(Referral).where(
+                    Referral.user_id == user.id
+                )
+            )
 
-        await session.commit()
+            referral = result.scalar_one_or_none()
+
+            if referral is None:
+                referral = Referral(
+                    user_id=user.id,
+                    referral_code=f"nano_{user.telegram_id}",
+                    referral_count=0,
+                )
+
+                session.add(referral)
+                await session.flush()
+
+            # -------------------------------------------------
+            # SUBSCRIPTION (FAOLLIK) + 7 KUNLIK TRIAL
+            # -------------------------------------------------
+
+            await get_or_create_subscription(session, user.id)
+
+            # -------------------------------------------------
+            # SAVE
+            # -------------------------------------------------
+
+            await session.commit()
+
+        except Exception:
+            # MUHIM: xatolik hech qachon yashirilmaydi — bu
+            # yerda faqat qaysi foydalanuvchi uchun boshlang'ich
+            # ma'lumotlar yaratilmagani aniq (telegram/token/
+            # session kabi maxfiy qiymatlarsiz) logga yoziladi va
+            # keyin QAYTA ko'tariladi (`raise`) — chaqiruvchi
+            # (`process_start`) bu xatolikni ushlab, foydalanuvchiga
+            # xavfsiz umumiy xabar ko'rsatadi.
+            await session.rollback()
+
+            logger.exception(
+                "Foydalanuvchi boshlang'ich ma'lumotlarini "
+                "yaratishda DB xatoligi: user_id=%s",
+                user.id,
+            )
+
+            raise
 
 
 async def process_start(

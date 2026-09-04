@@ -28,6 +28,10 @@ from app.services.media_service import (
     detect_post_content,
     send_post_to_storage,
 )
+from app.services.activity_service import (
+    get_or_create_subscription,
+    is_activity_active,
+)
 from app.services.storage_channel_service import ensure_storage_channel
 from app.services.user_service import (
     get_connected_telegram_account,
@@ -77,12 +81,17 @@ TOO_LARGE_TEXT = (
 #
 # MUHIM: Referral orqali beriladigan bonus/tier tizimi olib
 # tashlandi (14-bo'lim — Referral tizimi vaqtincha o'chirilgan).
-# Auto Reply soni endi barcha foydalanuvchilar uchun bitta
-# qat'iy (flat) limit bilan cheklanadi — botdan foydalanish
-# huquqining o'zi Faollik (trial/pullik) tizimi orqali
-# boshqariladi (qarang: app/services/activity_service.py).
+# Endi Auto Reply soni Faollik (trial/pullik) holatiga bog'liq:
+#
+#   - 7 kunlik bepul TRIAL   -> ko'pi bilan 3 ta Auto Reply
+#   - Faol (pullik) Activity -> CHEKSIZ (None)
+#
+# Trial ham, Activity ham tugagan bo'lsa (foydalanuvchi bu
+# ekranga umuman kira olmasligi kerak — qarang:
+# app/services/access_guard.py), xavfsiz standart sifatida
+# trial darajasidagi limit (3) qaytariladi.
 
-AUTO_REPLY_LIMIT_DEFAULT = 10
+AUTO_REPLY_LIMIT_TRIAL = 3
 
 
 async def get_auto_reply_limit(
@@ -90,11 +99,19 @@ async def get_auto_reply_limit(
     user_id: int,
 ) -> int | None:
     """
-    None = unlimited. Hozircha barcha foydalanuvchilar uchun
-    bitta flat limit qaytariladi.
+    None = unlimited (faol pullik Activity).
+    Aks holda (trial yoki muddati tugagan) — 3.
     """
 
-    return AUTO_REPLY_LIMIT_DEFAULT
+    subscription = await get_or_create_subscription(
+        session,
+        user_id,
+    )
+
+    if is_activity_active(subscription):
+        return None
+
+    return AUTO_REPLY_LIMIT_TRIAL
 
 
 # ============================================================

@@ -165,9 +165,12 @@ class AutoReplyEngine:
         client,
         event,
         auto_reply: dict,
+        telegram_account_id: int,
     ) -> bool:
+        auto_reply_id = auto_reply.get("id")
+        peer_id = int(event.chat_id)
+
         try:
-            auto_reply_id = auto_reply.get("id")
             message_type = auto_reply["message_type"]
             message_text = auto_reply["message_text"]
             file_id = auto_reply["file_id"]
@@ -180,12 +183,42 @@ class AutoReplyEngine:
             # Auto Reply 2.0: media Storage Channel orqali,
             # forward emas — yangi xabar sifatida yuboriladi.
             if storage_chat_id and storage_message_id:
-                return await send_stored_post(
+                # MUHIM (Auto Reply debug — xavfsiz, faqat
+                # texnik ID'lar, xabar mazmuni yo'q):
+                logger.info(
+                    "Auto Reply source found: "
+                    "storage_chat_id=%s, storage_message_id=%s",
+                    storage_chat_id,
+                    storage_message_id,
+                )
+
+                sent = await send_stored_post(
                     telethon_client=client,
                     storage_chat_id=storage_chat_id,
                     storage_message_id=storage_message_id,
                     target_chat_id=event.chat_id,
                 )
+
+                if sent:
+                    logger.info(
+                        "Auto Reply sent successfully: "
+                        "auto_reply_id=%s, account_id=%s, "
+                        "peer_id=%s",
+                        auto_reply_id,
+                        telegram_account_id,
+                        peer_id,
+                    )
+                else:
+                    logger.warning(
+                        "Auto Reply send failed: "
+                        "auto_reply_id=%s, account_id=%s, "
+                        "peer_id=%s",
+                        auto_reply_id,
+                        telegram_account_id,
+                        peer_id,
+                    )
+
+                return sent
 
             if message_type == "text":
                 if not message_text:
@@ -243,11 +276,27 @@ class AutoReplyEngine:
                 )
                 return False
 
+            logger.info(
+                "Auto Reply sent successfully: "
+                "auto_reply_id=%s, account_id=%s, peer_id=%s",
+                auto_reply_id,
+                telegram_account_id,
+                peer_id,
+            )
+
             return True
 
         except Exception:
+            # MUHIM: to'liq traceback logga yoziladi (diagnostika
+            # uchun zarur), lekin xabar matni/token/session kabi
+            # maxfiy qiymatlar bu yerda umuman ishlatilmagani
+            # uchun ularning logga tushish xavfi yo'q.
             logger.exception(
-                "Auto reply yuborishda xatolik."
+                "Auto Reply send error: auto_reply_id=%s, "
+                "account_id=%s, peer_id=%s",
+                auto_reply_id,
+                telegram_account_id,
+                peer_id,
             )
             return False
 
@@ -443,20 +492,23 @@ class AutoReplyEngine:
                 if not matched:
                     continue
 
+                # MUHIM (Auto Reply debug — xavfsiz, faqat
+                # texnik ID'lar, xabar mazmuni yo'q):
+                logger.info(
+                    "Auto Reply matched: auto_reply_id=%s, "
+                    "account_id=%s, peer_id=%s",
+                    auto_reply.get("id"),
+                    telegram_account_id,
+                    int(event.chat_id),
+                )
+
                 sent = await self._send_auto_reply(
                     client=telegram_client_manager.get_client(
                         telegram_id
                     ),
                     event=event,
                     auto_reply=auto_reply,
-                )
-
-                logger.info(
-                    "Auto Reply id=%s mos keldi "
-                    "(telegram_id=%s): yuborildi=%s",
-                    auto_reply.get("id"),
-                    telegram_id,
-                    sent,
+                    telegram_account_id=telegram_account_id,
                 )
 
                 if sent:
