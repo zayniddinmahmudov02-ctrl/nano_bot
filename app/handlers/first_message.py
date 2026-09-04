@@ -592,15 +592,20 @@ async def receive_edit_first_message(
         )
         return
 
-    storage_message_id = await send_post_to_storage(
-        bot=message.bot,
-        telethon_client=telethon_client,
-        storage_chat_id=storage_channel.chat_id,
-        message_type=message_type,
-        text=text,
-        file_id=file_id,
-        file_name=file_name,
-    )
+    try:
+        storage_message_id = await send_post_to_storage(
+            bot=message.bot,
+            telethon_client=telethon_client,
+            storage_chat_id=storage_channel.chat_id,
+            message_type=message_type,
+            text=text,
+            file_id=file_id,
+            file_name=file_name,
+        )
+    except StoragePostTooLarge:
+        await state.clear()
+        await message.answer(TOO_LARGE_TEXT)
+        return
 
     if storage_message_id is None:
         await message.answer(
