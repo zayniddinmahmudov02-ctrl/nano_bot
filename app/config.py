@@ -149,18 +149,31 @@ NANO_BOT_SYSTEMD_SERVICE = get_env(
 
 
 # =========================================================
-# PREMIUM
+# FAOLLIK / MONETIZATSIYA (Premium o'rnini bosuvchi tizim)
 # =========================================================
+#
+# MUHIM: PREMIUM_PRICE/PREMIUM_CURRENCY ESKI, endi ishlatilmaydigan
+# sozlamalar edi — Faollik paketlari narxi endi
+# `app/services/payment_service.py`dagi ACTIVITY_PACKAGES
+# lug'atida qattiq belgilangan (spec talabiga ko'ra: 1 oy $1,
+# 3 oy $2.50, 6 oy $4, 1 yil $6).
 
-PREMIUM_PRICE = get_env(
-    "PREMIUM_PRICE",
-    "1",
+TRIAL_DURATION_DAYS = 7
+
+# To'lov (chek/skrinshot) so'rovlari yuboriladigan Telegram
+# kanali. .env orqali sozlanishi mumkin — sozlanmagan bo'lsa,
+# vazifada berilgan standart kanal ID ishlatiladi. MUHIM:
+# real `.env` fayli bu o'zgaruvchi bilan qayta yozilmaydi —
+# faqat `.env.example`ga placeholder qo'shildi.
+PAYMENT_CHANNEL_ID_RAW = get_env(
+    "PAYMENT_CHANNEL_ID",
+    "-1004392136813",
 )
 
-PREMIUM_CURRENCY = get_env(
-    "PREMIUM_CURRENCY",
-    "USD",
-)
+try:
+    PAYMENT_CHANNEL_ID = int(PAYMENT_CHANNEL_ID_RAW)
+except ValueError:
+    PAYMENT_CHANNEL_ID = 0
 
 
 # =========================================================

@@ -9,6 +9,7 @@ from app.services.auto_reply_engine import auto_reply_engine
 from app.services.first_message_engine import (
     first_message_engine,
 )
+from app.services.scheduler_service import is_scheduler_running
 from app.telegram.user_client import telegram_client_manager
 
 logger = logging.getLogger(__name__)
@@ -167,16 +168,17 @@ async def get_system_status() -> List[ComponentStatus]:
     # ------------------------------------------------------
     # SCHEDULER
     # ------------------------------------------------------
-    # MUHIM: loyihada apscheduler dependency sifatida mavjud,
-    # lekin hozircha hech qanday joyda ishga tushirilmagan.
-    # Shuning uchun soxta "Running" holatini ko'rsatish o'rniga,
-    # xolisona holat beriladi.
+    # Exchange rate refresh + Faollik muddati sweep job'lari
+    # shu scheduler orqali ishlaydi (app/services/scheduler_service.py).
 
     results.append(
         ComponentStatus(
             "Scheduler",
-            STATUS_WARNING,
-            "Sozlanmagan (hozircha ishlatilmaydi)",
+            (
+                STATUS_RUNNING
+                if is_scheduler_running()
+                else STATUS_STOPPED
+            ),
         )
     )
 

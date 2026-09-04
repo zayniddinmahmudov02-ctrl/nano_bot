@@ -37,9 +37,6 @@ def nano_main_reply_keyboard(
                 KeyboardButton(text=t("btn_settings", lang)),
                 KeyboardButton(text=t("btn_info", lang)),
             ],
-            [
-                KeyboardButton(text=t("btn_referrals", lang)),
-            ],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -101,12 +98,6 @@ def nano_main_menu_keyboard(
                 InlineKeyboardButton(
                     text=t("btn_info", lang),
                     callback_data="nano:info",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=t("btn_referrals", lang),
-                    callback_data="nano:referrals",
                 ),
             ],
         ]
@@ -201,8 +192,8 @@ def nano_settings_menu_keyboard(
                     callback_data="nano:settings:language",
                 ),
                 InlineKeyboardButton(
-                    text=t("btn_settings_premium", lang),
-                    callback_data="nano:settings:premium",
+                    text=t("btn_settings_activity", lang),
+                    callback_data="nano:activity",
                 ),
             ],
             [
@@ -238,11 +229,83 @@ def nano_language_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def nano_premium_keyboard(
+# ============================================================
+# FAOLLIK (ACTIVITY)
+# ============================================================
+
+def nano_activity_menu_keyboard(
     lang: str = DEFAULT_LANGUAGE,
 ) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[_back("nano:settings", lang)]
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("btn_package_1m", lang),
+                    callback_data="nano:activity:package:1m",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("btn_package_3m", lang),
+                    callback_data="nano:activity:package:3m",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("btn_package_6m", lang),
+                    callback_data="nano:activity:package:6m",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("btn_package_1y", lang),
+                    callback_data="nano:activity:package:1y",
+                ),
+            ],
+            _back("nano:settings", lang),
+        ]
+    )
+
+
+def nano_activity_package_keyboard(
+    package_key: str,
+    lang: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("btn_activity_buy", lang),
+                    callback_data=(
+                        f"nano:activity:buy:{package_key}"
+                    ),
+                ),
+            ],
+            _back("nano:activity", lang),
+        ]
+    )
+
+
+def nano_activity_receipt_cancel_keyboard(
+    lang: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[_back("nano:activity", lang)]
+    )
+
+
+def nano_access_denied_keyboard(
+    lang: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=t("btn_activity_open", lang),
+                    callback_data="nano:activity",
+                ),
+            ],
+        ]
     )
 
 
@@ -441,7 +504,10 @@ __all__ = [
     "nano_assistant_input_keyboard",
     "nano_settings_menu_keyboard",
     "nano_language_keyboard",
-    "nano_premium_keyboard",
+    "nano_activity_menu_keyboard",
+    "nano_activity_package_keyboard",
+    "nano_activity_receipt_cancel_keyboard",
+    "nano_access_denied_keyboard",
     "nano_profile_keyboard",
     "nano_profile_input_cancel_keyboard",
     "nano_password_not_set_keyboard",

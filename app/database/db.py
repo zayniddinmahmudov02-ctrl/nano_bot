@@ -123,6 +123,55 @@ async def run_manual_migrations() -> None:
         "ALTER TABLE user_settings "
         "ADD COLUMN IF NOT EXISTS password_locked_until "
         "TIMESTAMPTZ",
+        # Faollik (Activity) tizimi — Premium o'rnini bosadi.
+        # `trial_started_at`/`trial_expires_at` allaqachon mavjud;
+        # faqat yangi `activity_expires_at` qo'shiladi. Eski
+        # `premium_*` ustunlari o'chirilmaydi (deprecated holda
+        # qoladi).
+        "ALTER TABLE subscriptions "
+        "ADD COLUMN IF NOT EXISTS activity_expires_at "
+        "TIMESTAMPTZ",
+        # Faollik to'lovlari (admin qo'lda tasdiqlaydi).
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS telegram_id BIGINT",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS package VARCHAR(20)",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS duration_days INTEGER",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS usd_amount NUMERIC(12, 2)",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS uzs_amount NUMERIC(18, 2)",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS exchange_rate "
+        "NUMERIC(18, 6)",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS receipt_file_id TEXT",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS receipt_file_type "
+        "VARCHAR(20)",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS admin_channel_message_id "
+        "BIGINT",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ",
+        "ALTER TABLE payments "
+        "ADD COLUMN IF NOT EXISTS approved_by BIGINT",
+        # Legacy default "pending" (lowercase) — yangi kod
+        # "PENDING" (uppercase) yozadi, lekin ustun darajasidagi
+        # DEFAULT o'zgartirilmaydi (mavjud qatorlarga ta'sir
+        # qilmasligi uchun).
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "ix_payments_payment_id_unique ON payments (payment_id) "
+        "WHERE payment_id IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS ix_payments_status "
+        "ON payments (status)",
+        "CREATE INDEX IF NOT EXISTS ix_payments_telegram_id "
+        "ON payments (telegram_id)",
     ]
 
     try:

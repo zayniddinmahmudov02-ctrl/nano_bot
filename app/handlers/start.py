@@ -11,11 +11,11 @@ from app.database import AsyncSessionLocal
 from app.database.models import (
     Referral,
     Statistics,
-    Subscription,
     User,
     UserSettings,
 )
 from app.keyboards.nano import nano_main_reply_keyboard
+from app.services.activity_service import get_or_create_subscription
 from app.services.user_service import (
     get_or_create_user,
     get_user_language,
@@ -26,29 +26,6 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-REFERRAL_DEEP_LINK_PREFIX = "ref_"
-
-
-def _extract_referral_code(
-    payload: Optional[str],
-) -> Optional[str]:
-    """
-    "/start ref_XXXXX" ko'rinishidagi deep link payload'dan
-    referral kodini ajratib oladi.
-    """
-
-    if not payload:
-        return None
-
-    payload = payload.strip()
-
-    if not payload.startswith(REFERRAL_DEEP_LINK_PREFIX):
-        return None
-
-    code = payload[len(REFERRAL_DEEP_LINK_PREFIX):].strip()
-
-    return code or None
-
 
 async def initialize_user_data(user: User) -> None:
     """
@@ -57,8 +34,13 @@ async def initialize_user_data(user: User) -> None:
     Quyidagilar yaratiladi:
     - UserSettings
     - Statistics
-    - Subscription
-    - Referral
+    - Subscription (Faollik) — YANGI foydalanuvchi uchun shu
+      yerda 7 kunlik bepul TRIAL ham avtomatik boshlanadi
+      (`activity_service.get_or_create_subscription` orqali,
+      faqat qator hali mavjud bo'lmasa — shu sabab qayta-qayta
+      trial berilmaydi).
+    - Referral (eski, endi UI'da ko'rinmaydigan tizim uchun —
+      mavjud ma'lumot tuzilishini buzmaslik uchun saqlanadi)
     """
 
     async with AsyncSessionLocal() as session:
@@ -107,26 +89,6 @@ async def initialize_user_data(user: User) -> None:
             session.add(statistics)
 
         # -------------------------------------------------
-        # SUBSCRIPTION
-        # -------------------------------------------------
-
-        result = await session.execute(
-            select(Subscription).where(
-                Subscription.user_id == user.id
-            )
-        )
-
-        subscription = result.scalar_one_or_none()
-
-        if subscription is None:
-            subscription = Subscription(
-                user_id=user.id,
-                status="free",
-            )
-
-            session.add(subscription)
-
-        # -------------------------------------------------
         # REFERRAL
         # -------------------------------------------------
 
@@ -146,6 +108,14 @@ async def initialize_user_data(user: User) -> None:
             )
 
             session.add(referral)
+
+        await session.flush()
+
+        # -------------------------------------------------
+        # SUBSCRIPTION (FAOLLIK) + 7 KUNLIK TRIAL
+        # -------------------------------------------------
+
+        await get_or_create_subscription(session, user.id)
 
         # -------------------------------------------------
         # SAVE
@@ -199,43 +169,11 @@ async def process_start(
 
         await initialize_user_data(user)
 
-        # -------------------------------------------------
-        # REFERRAL (deep link: t.me/bot?start=ref_XXXXX)
-        # -------------------------------------------------
-
-        referral_code = _extract_referral_code(
-            referral_payload
-        )
-
-        if referral_code:
-            try:
-                # Circular importni oldini olish uchun
-                # funksiya ichida import qilinadi.
-                from app.handlers.referrals import (
-                    apply_referral,
-                )
-
-                async with AsyncSessionLocal() as session:
-                    applied = await apply_referral(
-                        session,
-                        new_user_id=user.id,
-                        referral_code=referral_code,
-                    )
-
-                    await session.commit()
-
-                if applied:
-                    logger.info(
-                        "Referral qo'llandi: new_user_id=%s",
-                        user.id,
-                    )
-
-            except Exception:
-                logger.exception(
-                    "Referralni qo'llashda xatolik: "
-                    "new_user_id=%s",
-                    user.id,
-                )
+        # MUHIM: Referral tizimi vaqtincha butunlay olib
+        # tashlangan (14-bo'lim) — deep link orqali referral
+        # qo'llash endi ishlamaydi. Eski DB ma'lumotlari
+        # (Referral jadvali) buzilmaydi/o'chirilmaydi, faqat
+        # endi hech narsa ularni yangilamaydi.
 
         # -------------------------------------------------
         # QISQA SALOMLASHUV + PASTKI MENU PANELI

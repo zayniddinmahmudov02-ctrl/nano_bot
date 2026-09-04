@@ -8,7 +8,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, ErrorEvent, MenuButtonCommands
 
-from app.config import BOT_TOKEN, LOG_LEVEL
+from app.config import BOT_TOKEN, LOG_LEVEL, PAYMENT_CHANNEL_ID
 from app.database.db import (
     check_database,
     close_database,
@@ -24,17 +24,21 @@ from app.handlers import (
     auto_replies_router,
     first_message_router,
     assistant_router,
-    referrals_router,
     statistics_router,
     language_router,
     settings_router,
-    premium_router,
+    activity_router,
     info_router,
     admin_router,
+    admin_payments_router,
 )
 from app.middlewares import MaintenanceMiddleware, PasswordLockMiddleware
 from app.services.auto_reply_engine import auto_reply_engine
 from app.services.first_message_engine import first_message_engine
+from app.services.scheduler_service import (
+    start_scheduler,
+    stop_scheduler,
+)
 from app.services.security_service import set_bot_instance
 from app.telegram.user_client import telegram_client_manager
 from app.utils.logger import configure_logging
@@ -112,10 +116,6 @@ async def configure_bot_ui(bot: Bot) -> None:
                 BotCommand(
                     command="info",
                     description="ℹ️ Nano-Info",
-                ),
-                BotCommand(
-                    command="referrals",
-                    description="👥 Referallar",
                 ),
             ]
         )
@@ -251,26 +251,26 @@ def register_routers(dp: Dispatcher) -> None:
     # Nano-Yordamchi (YouTube-Save / Insta-Save)
     dp.include_router(assistant_router)
 
-    # Referallar
-    dp.include_router(referrals_router)
-
     # Statistika (legacy)
     dp.include_router(statistics_router)
 
     # Til (legacy — endi Sozlamalar ichida ham mavjud)
     dp.include_router(language_router)
 
-    # Sozlamalar (til/premium/profil/parol)
+    # Sozlamalar (til/faollik/profil/parol)
     dp.include_router(settings_router)
 
-    # Premium (legacy)
-    dp.include_router(premium_router)
+    # Faollik (Activity) — paket tanlash, to'lov, chek yuborish
+    dp.include_router(activity_router)
 
     # Nano-Info
     dp.include_router(info_router)
 
     # Admin panel
     dp.include_router(admin_router)
+
+    # Admin: to'lovlar kanalidagi Tasdiqlash/Rad etish tugmalari
+    dp.include_router(admin_payments_router)
 
     logger.info("Barcha handler routerlar yuklandi.")
 
@@ -372,6 +372,58 @@ async def startup(bot: Bot) -> None:
             "First Message Engine ishga tushmadi."
         )
 
+    # --------------------------------------------------------
+    # SCHEDULER (exchange rate refresh + activity expiry sweep)
+    # --------------------------------------------------------
+
+    try:
+        await start_scheduler()
+
+    except Exception:
+        logger.exception(
+            "Scheduler ishga tushmadi."
+        )
+
+    # --------------------------------------------------------
+    # PAYMENT CHANNEL — botning post yuborish huquqini tekshirish
+    # --------------------------------------------------------
+    # MUHIM: bu tekshiruv faqat xavfsiz DIAGNOSTIKA uchun — agar
+    # botda kanalga yozish huquqi bo'lmasa, bot ishga tushishdan
+    # to'xtamaydi, faqat aniq ogohlantirish logga yoziladi.
+
+    try:
+        chat = await bot.get_chat(PAYMENT_CHANNEL_ID)
+
+        member = await bot.get_chat_member(
+            PAYMENT_CHANNEL_ID,
+            bot.id,
+        )
+
+        can_post = getattr(member, "can_post_messages", None)
+
+        if member.status not in ("administrator", "creator") or (
+            can_post is False
+        ):
+            logger.warning(
+                "To'lovlar kanalida bot admin/post huquqiga "
+                "ega emas ko'rinadi (chat_id=%s). To'lov "
+                "so'rovlari yuborilmasligi mumkin.",
+                PAYMENT_CHANNEL_ID,
+            )
+        else:
+            logger.info(
+                "To'lovlar kanali tayyor: %s",
+                chat.title or PAYMENT_CHANNEL_ID,
+            )
+
+    except Exception:
+        logger.warning(
+            "To'lovlar kanalini tekshirib bo'lmadi "
+            "(chat_id=%s) — bot shu kanalga a'zo/admin "
+            "emasligi mumkin.",
+            PAYMENT_CHANNEL_ID,
+        )
+
     logger.info("Nano-Bot ishga tayyor.")
 
 
@@ -385,6 +437,20 @@ async def shutdown() -> None:
     """
 
     logger.info("Nano-Bot shutdown boshlandi.")
+
+    # --------------------------------------------------------
+    # SCHEDULER
+    # --------------------------------------------------------
+
+    try:
+        await stop_scheduler()
+
+        logger.info("Scheduler to'xtatildi.")
+
+    except Exception:
+        logger.exception(
+            "Scheduler to'xtatishda xatolik."
+        )
 
     # --------------------------------------------------------
     # AUTO REPLY ENGINE

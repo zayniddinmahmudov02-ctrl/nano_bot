@@ -909,12 +909,27 @@ class Subscription(Base):
         nullable=True,
     )
 
+    # MUHIM (Faollik/Monetizatsiya arxitekturasi): "Premium"
+    # tushunchasi olib tashlandi, endi "Faollik" (Activity)
+    # ishlatiladi. `premium_started_at`/`premium_expires_at`
+    # ustunlari ESKI arxitekturadan qoladi (mavjud ma'lumotni
+    # buzmaslik uchun o'chirilmaydi/nomlanmaydi), lekin endi
+    # kodning hech bir joyida ishlatilmaydi — ular deprecated.
+    # Yangi, faol maydon — `activity_expires_at`.
     premium_started_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
 
     premium_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Faollik (pullik paket) qachongacha amal qilishi. NULL —
+    # foydalanuvchi hech qachon Faollik sotib olmagan (faqat
+    # trial bo'lishi mumkin).
+    activity_expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
@@ -934,7 +949,7 @@ class Subscription(Base):
 
 
 # ============================================================
-# PAYMENT
+# PAYMENT (Faollik to'lovlari — admin qo'lda tasdiqlaydi)
 # ============================================================
 
 class Payment(Base):
@@ -953,6 +968,18 @@ class Payment(Base):
         index=True,
     )
 
+    # Qulaylik uchun users.telegram_id'ning nusxasi — admin
+    # panel/payment channel kartalarida qo'shimcha JOIN'siz
+    # ko'rsatish uchun.
+    telegram_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+        index=True,
+    )
+
+    # ESKI (legacy) maydonlar — mavjud yozuvlarni buzmaslik
+    # uchun saqlanadi. Yangi Faollik to'lovlari uchun
+    # `usd_amount`/`uzs_amount` ishlatiladi.
     amount: Mapped[float] = mapped_column(
         Numeric(12, 2),
         nullable=False,
@@ -964,21 +991,140 @@ class Payment(Base):
         nullable=False,
     )
 
+    # PENDING | APPROVED | REJECTED | CANCELLED
     status: Mapped[str] = mapped_column(
         String(50),
-        default="pending",
+        default="PENDING",
         nullable=False,
+        index=True,
     )
 
+    # Har bir to'lov uchun unique, tashqi ko'rinadigan ID
+    # (masalan UUID4 hex) — admin panel/payment channel
+    # kartalarida ko'rsatiladi.
     payment_id: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
+        unique=True,
         index=True,
+    )
+
+    # Faollik paketi kaliti: "1m" | "3m" | "6m" | "1y".
+    package: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    duration_days: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    usd_amount: Mapped[Optional[float]] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+    )
+
+    uzs_amount: Mapped[Optional[float]] = mapped_column(
+        Numeric(18, 2),
+        nullable=True,
+    )
+
+    # To'lov so'rovi yaratilgan paytdagi USD->UZS kursi
+    # (informatsion, audit uchun saqlanadi).
+    exchange_rate: Mapped[Optional[float]] = mapped_column(
+        Numeric(18, 6),
+        nullable=True,
+    )
+
+    # Foydalanuvchi yuborgan chek/skrinshotning Bot API file_id'si
+    # (faqat botning o'z to'lovlar kanaliga qayta yuborish uchun —
+    # bu yerda Telethon/Storage Channel arxitekturasi TATBIQ
+    # ETILMAYDI, chunki bu shaxsiy Auto Reply/First Message media
+    # emas, balki bot o'zi administratori bo'lgan to'lovlar
+    # kanaliga oddiy Bot API xabar).
+    receipt_file_id: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    receipt_file_type: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    # To'lovlar kanalidagi so'rov kartasining message_id'si —
+    # tasdiqlash/rad etishda shu xabarni tahrirlash uchun.
+    admin_channel_message_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Tasdiqlagan/rad etgan adminning Telegram ID'si.
+    approved_by: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+
+# ============================================================
+# EXCHANGE RATE CACHE
+# ============================================================
+#
+# USD -> UZS kursi uchun yagona (singleton, id=1) qator.
+# Har bir user request'da tashqi API'ga murojaat qilinmasligi
+# uchun kurs shu yerda kesh qilinadi (+ jarayon xotirasida ham).
+
+class ExchangeRateCache(Base):
+    __tablename__ = "exchange_rate_cache"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    rate: Mapped[float] = mapped_column(
+        Numeric(18, 6),
+        nullable=False,
+    )
+
+    source: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 

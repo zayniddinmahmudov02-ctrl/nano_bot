@@ -17,6 +17,7 @@ from app.keyboards.first_message import (
     first_message_interval_keyboard,
 )
 from app.keyboards.main import main_menu_keyboard
+from app.services.access_guard import guard_callback_access
 from app.services.media_service import (
     StoragePostTooLarge,
     detect_post_content,
@@ -26,6 +27,7 @@ from app.services.storage_channel_service import ensure_storage_channel
 from app.services.user_service import (
     get_connected_telegram_account,
     get_user_by_telegram_id,
+    get_user_language,
 )
 from app.telegram.user_client import telegram_client_manager
 
@@ -132,6 +134,8 @@ async def first_message_card(
             telegram_id,
         )
 
+        lang = await get_user_language(session, telegram_id)
+
         if user is None:
             await callback.answer(
                 "❌ Foydalanuvchi topilmadi.",
@@ -146,6 +150,14 @@ async def first_message_card(
         )
 
         first_message = result.scalar_one_or_none()
+
+    # MUHIM (defense-in-depth): bu ekranga eski (trial/Faollik
+    # tugashidan OLDIN yuborilgan) inline tugma orqali ham
+    # kirish mumkin — shu sabab kirish huquqi shu yerda ham
+    # mustaqil qayta tekshiriladi (faqat Nano-Agent bo'lim
+    # kirish nuqtasiga ishonib qolinmaydi).
+    if not await guard_callback_access(callback, lang):
+        return
 
     await callback.answer()
 

@@ -19,29 +19,16 @@ from app.database.models import (
     TelegramAccount,
     User,
 )
-
-# ============================================================
-# PAYMENT STATUS — mavjud kodda hali Payment.status uchun aniq
-# qiymatlar belgilanmagan (default "pending"). Kelajakdagi
-# implementatsiyalar bilan mos ishlashi uchun eng ko'p
-# tarqalgan status nomlari bilan moslashtirilgan.
-# ============================================================
-
-SUCCESS_PAYMENT_STATUSES = (
-    "success",
-    "successful",
-    "paid",
-    "completed",
+from app.services.activity_service import (
+    is_activity_active,
+    is_trial_active,
 )
-
-PENDING_PAYMENT_STATUSES = ("pending",)
-
-FAILED_PAYMENT_STATUSES = (
-    "failed",
-    "cancelled",
-    "canceled",
-    "error",
-    "declined",
+from app.services.payment_service import (
+    PACKAGE_ORDER,
+    STATUS_APPROVED,
+    STATUS_PENDING,
+    STATUS_REJECTED,
+    get_package,
 )
 
 
@@ -69,7 +56,7 @@ class OverviewStats:
     total_auto_replies: int
     active_auto_replies: int
     total_first_messages: int
-    premium_users: int
+    active_activity_users: int
     auto_replies_sent: int
     first_messages_sent: int
     referred_users: int
@@ -159,17 +146,13 @@ async def get_overview_stats() -> OverviewStats:
             )
         ).scalar_one()
 
-        premium_users = (
+        active_activity_users = (
             await session.execute(
                 select(func.count(Subscription.id)).where(
-                    Subscription.status == "premium",
-                    (
-                        Subscription.premium_expires_at.is_(None)
-                        | (
-                            Subscription.premium_expires_at
-                            > _now()
-                        )
+                    Subscription.activity_expires_at.is_not(
+                        None
                     ),
+                    Subscription.activity_expires_at > now,
                 )
             )
         ).scalar_one()
@@ -211,23 +194,15 @@ async def get_overview_stats() -> OverviewStats:
             )
         ).scalar_one()
 
-        revenue_result = await session.execute(
-            select(
-                func.coalesce(func.sum(Payment.amount), 0),
-                Payment.currency,
+        total_revenue = (
+            await session.execute(
+                select(
+                    func.coalesce(
+                        func.sum(Payment.usd_amount), 0
+                    )
+                ).where(Payment.status == STATUS_APPROVED)
             )
-            .where(
-                Payment.status.in_(SUCCESS_PAYMENT_STATUSES)
-            )
-            .group_by(Payment.currency)
-            .order_by(func.sum(Payment.amount).desc())
-            .limit(1)
-        )
-
-        revenue_row = revenue_result.first()
-
-        total_revenue = float(revenue_row[0]) if revenue_row else 0.0
-        currency = revenue_row[1] if revenue_row else "USD"
+        ).scalar_one()
 
         return OverviewStats(
             total_users=total_users,
@@ -236,13 +211,13 @@ async def get_overview_stats() -> OverviewStats:
             total_auto_replies=total_auto_replies,
             active_auto_replies=active_auto_replies,
             total_first_messages=total_first_messages,
-            premium_users=premium_users,
+            active_activity_users=active_activity_users,
             auto_replies_sent=int(auto_replies_sent),
             first_messages_sent=int(first_messages_sent),
             referred_users=referred_users,
             total_payments=total_payments,
-            total_revenue=total_revenue,
-            currency=currency,
+            total_revenue=float(total_revenue),
+            currency="USD",
             new_users=new_users_window,
         )
 
@@ -262,7 +237,7 @@ class UserListItem:
     account_count: int
     auto_reply_count: int
     has_first_message: bool
-    is_premium: bool
+    has_active_access: bool
     referral_count: int
 
 
@@ -306,24 +281,40 @@ async def get_users_page(
 
             account_counts = dict(account_result.all())
 
-        premium_ids = set()
+        active_access_ids = set()
 
         if user_ids:
-            premium_result = await session.execute(
+            now = _now()
+
+            access_result = await session.execute(
                 select(Subscription.user_id).where(
                     Subscription.user_id.in_(user_ids),
-                    Subscription.status == "premium",
                     (
-                        Subscription.premium_expires_at.is_(None)
+                        (
+                            Subscription.trial_expires_at.is_not(
+                                None
+                            )
+                            & (
+                                Subscription.trial_expires_at
+                                > now
+                            )
+                        )
                         | (
-                            Subscription.premium_expires_at
-                            > _now()
+                            Subscription.activity_expires_at.is_not(
+                                None
+                            )
+                            & (
+                                Subscription.activity_expires_at
+                                > now
+                            )
                         )
                     ),
                 )
             )
 
-            premium_ids = set(premium_result.scalars().all())
+            active_access_ids = set(
+                access_result.scalars().all()
+            )
 
         auto_reply_counts = {}
 
@@ -381,7 +372,9 @@ async def get_users_page(
                 has_first_message=(
                     user.id in first_message_ids
                 ),
-                is_premium=user.id in premium_ids,
+                has_active_access=(
+                    user.id in active_access_ids
+                ),
                 referral_count=referral_counts.get(
                     user.id, 0
                 ),
@@ -408,7 +401,7 @@ class UserDetail:
     active_auto_reply_count: int
     has_first_message: bool
     first_message_active: bool
-    premium_status: str
+    activity_status: str
     referral_count: int
     referred_by: Optional[int]
 
@@ -471,14 +464,13 @@ async def get_user_detail(user_id: int) -> Optional[UserDetail]:
         ).scalar_one_or_none()
 
         if subscription is None:
-            premium_status = "🔴 Yo'q"
-        elif subscription.status == "premium" and (
-            subscription.premium_expires_at is None
-            or subscription.premium_expires_at > _now()
-        ):
-            premium_status = "🟢 Faol"
+            activity_status = "🔴 Yo'q"
+        elif is_trial_active(subscription):
+            activity_status = "🎁 Trial"
+        elif is_activity_active(subscription):
+            activity_status = "🟢 Faol"
         else:
-            premium_status = f"⚪️ {subscription.status}"
+            activity_status = "🔴 Muddati tugagan"
 
         referral = (
             await session.execute(
@@ -507,7 +499,7 @@ async def get_user_detail(user_id: int) -> Optional[UserDetail]:
                 if first_message is not None
                 else False
             ),
-            premium_status=premium_status,
+            activity_status=activity_status,
             referral_count=(
                 referral.referral_count
                 if referral is not None
@@ -635,38 +627,37 @@ async def get_first_message_stats() -> FirstMessageStats:
 
 
 # ============================================================
-# 6.4 PREMIUM
+# 6.4 FAOLLIK (ACTIVITY) — Premium o'rnini bosadi
 # ============================================================
 
 @dataclass
-class PremiumStats:
-    total_premium: int
-    active_premium: int
+class ActivityStats:
+    trial_users: int
+    active_paid_users: int
     expiring_soon: int
-    revenue: float
-    currency: str
+    approved_revenue: float
 
 
-async def get_premium_stats() -> PremiumStats:
+async def get_activity_stats() -> ActivityStats:
     async with AsyncSessionLocal() as session:
-        total_premium = (
+        now = _now()
+
+        trial_users = (
             await session.execute(
                 select(func.count(Subscription.id)).where(
-                    Subscription.status == "premium"
+                    Subscription.trial_expires_at.is_not(None),
+                    Subscription.trial_expires_at > now,
                 )
             )
         ).scalar_one()
 
-        now = _now()
-
-        active_premium = (
+        active_paid_users = (
             await session.execute(
                 select(func.count(Subscription.id)).where(
-                    Subscription.status == "premium",
-                    (
-                        Subscription.premium_expires_at.is_(None)
-                        | (Subscription.premium_expires_at > now)
+                    Subscription.activity_expires_at.is_not(
+                        None
                     ),
+                    Subscription.activity_expires_at > now,
                 )
             )
         ).scalar_one()
@@ -676,118 +667,184 @@ async def get_premium_stats() -> PremiumStats:
         expiring_soon = (
             await session.execute(
                 select(func.count(Subscription.id)).where(
-                    Subscription.status == "premium",
-                    Subscription.premium_expires_at.is_not(None),
-                    Subscription.premium_expires_at > now,
-                    Subscription.premium_expires_at <= soon,
+                    Subscription.activity_expires_at.is_not(
+                        None
+                    ),
+                    Subscription.activity_expires_at > now,
+                    Subscription.activity_expires_at <= soon,
                 )
             )
         ).scalar_one()
 
-        revenue_row = (
+        approved_revenue = (
             await session.execute(
                 select(
                     func.coalesce(
-                        func.sum(Payment.amount), 0
-                    ),
-                    Payment.currency,
-                )
-                .where(
-                    Payment.status.in_(
-                        SUCCESS_PAYMENT_STATUSES
+                        func.sum(Payment.usd_amount), 0
                     )
-                )
-                .group_by(Payment.currency)
-                .order_by(func.sum(Payment.amount).desc())
-                .limit(1)
+                ).where(Payment.status == STATUS_APPROVED)
             )
-        ).first()
+        ).scalar_one()
 
-        return PremiumStats(
-            total_premium=total_premium,
-            active_premium=active_premium,
+        return ActivityStats(
+            trial_users=trial_users,
+            active_paid_users=active_paid_users,
             expiring_soon=expiring_soon,
-            revenue=float(revenue_row[0]) if revenue_row else 0.0,
-            currency=revenue_row[1] if revenue_row else "USD",
+            approved_revenue=float(approved_revenue),
         )
 
 
 # ============================================================
-# 6.5 PAYMENTS
+# 6.5 TO'LOVLAR (PAYMENTS)
 # ============================================================
+
+@dataclass
+class PackageBreakdownItem:
+    package: str
+    label: str
+    count: int
+
 
 @dataclass
 class PaymentStats:
     total: int
-    successful: int
     pending: int
-    failed: int
-    revenue_by_currency: List[tuple]
+    approved: int
+    rejected: int
+    today_count: int
+    month_count: int
+    total_revenue: float
+    approved_revenue: float
+    today_revenue: float
+    package_breakdown: List[PackageBreakdownItem]
 
 
 async def get_payment_stats() -> PaymentStats:
     async with AsyncSessionLocal() as session:
+        now = _now()
+        today_start = now.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        month_start = now.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+
         total = (
             await session.execute(
                 select(func.count(Payment.id))
             )
         ).scalar_one()
 
-        successful = (
-            await session.execute(
-                select(func.count(Payment.id)).where(
-                    Payment.status.in_(
-                        SUCCESS_PAYMENT_STATUSES
-                    )
-                )
-            )
-        ).scalar_one()
-
         pending = (
             await session.execute(
                 select(func.count(Payment.id)).where(
-                    Payment.status.in_(
-                        PENDING_PAYMENT_STATUSES
-                    )
+                    Payment.status == STATUS_PENDING
                 )
             )
         ).scalar_one()
 
-        failed = (
+        approved = (
             await session.execute(
                 select(func.count(Payment.id)).where(
-                    Payment.status.in_(
-                        FAILED_PAYMENT_STATUSES
+                    Payment.status == STATUS_APPROVED
+                )
+            )
+        ).scalar_one()
+
+        rejected = (
+            await session.execute(
+                select(func.count(Payment.id)).where(
+                    Payment.status == STATUS_REJECTED
+                )
+            )
+        ).scalar_one()
+
+        today_count = (
+            await session.execute(
+                select(func.count(Payment.id)).where(
+                    Payment.created_at >= today_start
+                )
+            )
+        ).scalar_one()
+
+        month_count = (
+            await session.execute(
+                select(func.count(Payment.id)).where(
+                    Payment.created_at >= month_start
+                )
+            )
+        ).scalar_one()
+
+        total_revenue = (
+            await session.execute(
+                select(
+                    func.coalesce(
+                        func.sum(Payment.usd_amount), 0
                     )
                 )
             )
         ).scalar_one()
 
-        revenue_rows = (
+        approved_revenue = (
             await session.execute(
                 select(
-                    Payment.currency,
                     func.coalesce(
-                        func.sum(Payment.amount), 0
-                    ),
-                )
-                .where(
-                    Payment.status.in_(
-                        SUCCESS_PAYMENT_STATUSES
+                        func.sum(Payment.usd_amount), 0
                     )
+                ).where(Payment.status == STATUS_APPROVED)
+            )
+        ).scalar_one()
+
+        today_revenue = (
+            await session.execute(
+                select(
+                    func.coalesce(
+                        func.sum(Payment.usd_amount), 0
+                    )
+                ).where(
+                    Payment.status == STATUS_APPROVED,
+                    Payment.approved_at >= today_start,
                 )
-                .group_by(Payment.currency)
+            )
+        ).scalar_one()
+
+        package_rows = (
+            await session.execute(
+                select(
+                    Payment.package,
+                    func.count(Payment.id),
+                )
+                .where(Payment.package.is_not(None))
+                .group_by(Payment.package)
             )
         ).all()
 
+        counts_by_package = dict(package_rows)
+
+        package_breakdown = [
+            PackageBreakdownItem(
+                package=key,
+                label=(
+                    get_package(key).label_uz
+                    if get_package(key) is not None
+                    else key
+                ),
+                count=counts_by_package.get(key, 0),
+            )
+            for key in PACKAGE_ORDER
+        ]
+
         return PaymentStats(
             total=total,
-            successful=successful,
             pending=pending,
-            failed=failed,
-            revenue_by_currency=[
-                (row[0], float(row[1])) for row in revenue_rows
-            ],
+            approved=approved,
+            rejected=rejected,
+            today_count=today_count,
+            month_count=month_count,
+            total_revenue=float(total_revenue),
+            approved_revenue=float(approved_revenue),
+            today_revenue=float(today_revenue),
+            package_breakdown=package_breakdown,
         )
 
 
@@ -864,8 +921,9 @@ __all__ = [
     "get_auto_reply_stats",
     "FirstMessageStats",
     "get_first_message_stats",
-    "PremiumStats",
-    "get_premium_stats",
+    "ActivityStats",
+    "get_activity_stats",
+    "PackageBreakdownItem",
     "PaymentStats",
     "get_payment_stats",
     "SecurityStats",

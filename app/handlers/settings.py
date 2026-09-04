@@ -1,23 +1,20 @@
 import logging
 import re
-from datetime import datetime, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
-from app.database.models import Subscription, User
+from app.database.models import User
 from app.keyboards.nano import (
     nano_language_keyboard,
     nano_password_disable_confirm_keyboard,
     nano_password_enabled_keyboard,
     nano_password_input_cancel_keyboard,
     nano_password_not_set_keyboard,
-    nano_premium_keyboard,
     nano_profile_input_cancel_keyboard,
     nano_profile_keyboard,
     nano_settings_menu_keyboard,
@@ -198,65 +195,14 @@ async def nano_settings_language_set(
 
 
 # ============================================================
-# PREMIUM
+# FAOLLIK (ACTIVITY)
 # ============================================================
-
-@router.callback_query(F.data == "nano:settings:premium")
-async def nano_settings_premium(
-    callback: CallbackQuery,
-) -> None:
-    if callback.from_user is None:
-        await callback.answer()
-        return
-
-    telegram_id = int(callback.from_user.id)
-
-    async with AsyncSessionLocal() as session:
-        user = await get_user_by_telegram_id(
-            session,
-            telegram_id,
-        )
-
-        lang = await get_user_language(session, telegram_id)
-
-        if user is None:
-            await callback.answer(
-                "❌ Foydalanuvchi topilmadi.",
-                show_alert=True,
-            )
-            return
-
-        result = await session.execute(
-            select(Subscription).where(
-                Subscription.user_id == user.id
-            )
-        )
-
-        subscription = result.scalar_one_or_none()
-
-        is_active_premium = bool(
-            subscription
-            and subscription.status == "premium"
-            and (
-                subscription.premium_expires_at is None
-                or subscription.premium_expires_at
-                > datetime.now(timezone.utc)
-            )
-        )
-
-    await callback.answer()
-
-    status_text = (
-        t("premium_status_active", lang)
-        if is_active_premium
-        else t("premium_status_free", lang)
-    )
-
-    await _safe_edit(
-        callback,
-        f"{t('premium_title', lang)}\n\n{status_text}",
-        nano_premium_keyboard(lang),
-    )
+#
+# MUHIM: "⚡ Faollik" tugmasi endi to'g'ridan-to'g'ri
+# `app/handlers/activity.py`dagi `nano:activity` callback'iga
+# yo'naltiriladi (keyboards/nano.py'da sozlangan) — bu yerda
+# alohida handler shart emas, ikkilanishning (duplicate logic)
+# oldini olish uchun bitta joyda saqlanadi.
 
 
 # ============================================================

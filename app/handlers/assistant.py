@@ -11,6 +11,10 @@ from app.keyboards.nano import (
     nano_assistant_input_keyboard,
     nano_assistant_menu_keyboard,
 )
+from app.services.access_guard import (
+    guard_callback_access,
+    guard_message_access,
+)
 from app.services.instagram_downloader_service import (
     download as download_instagram,
 )
@@ -92,6 +96,9 @@ async def assistant_command(
     async with AsyncSessionLocal() as session:
         lang = await get_user_language(session, telegram_id)
 
+    if not await guard_message_access(message, lang):
+        return
+
     await message.answer(
         t("assistant_menu_title", lang),
         reply_markup=nano_assistant_menu_keyboard(lang),
@@ -113,6 +120,9 @@ async def nano_assistant_menu(
 
     async with AsyncSessionLocal() as session:
         lang = await get_user_language(session, telegram_id)
+
+    if not await guard_callback_access(callback, lang):
+        return
 
     await callback.answer()
 
@@ -136,6 +146,12 @@ async def assistant_youtube_start(
 
     async with AsyncSessionLocal() as session:
         lang = await get_user_language(session, telegram_id)
+
+    # MUHIM (defense-in-depth): eski inline tugma orqali ham
+    # kirish mumkin — shu sabab kirish huquqi mustaqil qayta
+    # tekshiriladi.
+    if not await guard_callback_access(callback, lang):
+        return
 
     if not is_ffmpeg_available():
         await callback.answer()
@@ -171,6 +187,12 @@ async def assistant_instagram_start(
 
     async with AsyncSessionLocal() as session:
         lang = await get_user_language(session, telegram_id)
+
+    # MUHIM (defense-in-depth): eski inline tugma orqali ham
+    # kirish mumkin — shu sabab kirish huquqi mustaqil qayta
+    # tekshiriladi.
+    if not await guard_callback_access(callback, lang):
+        return
 
     if not is_ffmpeg_available():
         await callback.answer()

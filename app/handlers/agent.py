@@ -9,6 +9,10 @@ from app.database import AsyncSessionLocal
 from app.handlers.auto_replies import _render_list
 from app.keyboards.auto_reply import auto_reply_list_inline_keyboard
 from app.keyboards.nano import nano_agent_menu_keyboard, nano_stats_keyboard
+from app.services.access_guard import (
+    guard_callback_access,
+    guard_message_access,
+)
 from app.services.user_service import (
     get_user_by_telegram_id,
     get_user_language,
@@ -65,6 +69,9 @@ async def agent_command(
     async with AsyncSessionLocal() as session:
         lang = await get_user_language(session, telegram_id)
 
+    if not await guard_message_access(message, lang):
+        return
+
     await message.answer(
         t("agent_menu_title", lang),
         reply_markup=nano_agent_menu_keyboard(lang),
@@ -92,6 +99,9 @@ async def nano_agent_menu(
 
     async with AsyncSessionLocal() as session:
         lang = await get_user_language(session, telegram_id)
+
+    if not await guard_callback_access(callback, lang):
+        return
 
     await callback.answer()
 
@@ -125,6 +135,8 @@ async def nano_agent_auto(
             telegram_id,
         )
 
+        lang = await get_user_language(session, telegram_id)
+
         if user is None:
             await callback.answer(
                 "❌ Foydalanuvchi topilmadi.",
@@ -136,6 +148,12 @@ async def nano_agent_auto(
             session,
             user.id,
         )
+
+    # MUHIM (defense-in-depth): eski inline tugma orqali ham
+    # kirish mumkin — shu sabab kirish huquqi mustaqil qayta
+    # tekshiriladi.
+    if not await guard_callback_access(callback, lang):
+        return
 
     await callback.answer()
 

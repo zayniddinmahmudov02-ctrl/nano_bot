@@ -51,8 +51,8 @@ def admin_main_menu_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="⭐ Premium",
-                    callback_data="admin:premium",
+                    text="⚡ Faollik",
+                    callback_data="admin:activity",
                 ),
             ],
             [

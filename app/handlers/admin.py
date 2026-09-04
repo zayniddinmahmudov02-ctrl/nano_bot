@@ -25,11 +25,11 @@ from app.keyboards.admin import (
 )
 from app.keyboards.main import main_menu_keyboard
 from app.services.admin_stats_service import (
+    get_activity_stats,
     get_auto_reply_stats,
     get_first_message_stats,
     get_overview_stats,
     get_payment_stats,
-    get_premium_stats,
     get_security_stats,
     get_user_detail,
     get_users_page,
@@ -39,6 +39,7 @@ from app.services.bot_settings_service import (
     set_maintenance_mode,
 )
 from app.services.broadcast_service import run_broadcast
+from app.services.exchange_rate_service import get_exchange_rate
 from app.services.health_service import get_system_status
 from app.services.security_service import (
     SecuritySeverity,
@@ -157,7 +158,8 @@ async def _render_stats_text() -> str:
         f"<b>{stats.active_auto_replies}</b>\n"
         f"💬 First Message: "
         f"<b>{stats.total_first_messages}</b>\n"
-        f"⭐ Premium userlar: <b>{stats.premium_users}</b>\n"
+        f"⚡ Faol Faollik (pullik) userlar: "
+        f"<b>{stats.active_activity_users}</b>\n"
         f"📨 Yuborilgan Auto Reply: "
         f"<b>{stats.auto_replies_sent}</b>\n"
         f"📩 Yuborilgan First Message: "
@@ -211,7 +213,7 @@ async def _render_users_list(
         )
 
         status_icon = "🟢" if item.active else "🔴"
-        premium_icon = "⭐" if item.is_premium else "—"
+        activity_icon = "⚡" if item.has_active_access else "—"
         fm_icon = "👋" if item.has_first_message else "—"
         registered = item.created_at.strftime("%d.%m.%Y")
 
@@ -222,7 +224,7 @@ async def _render_users_list(
             f"    📅 {registered} | "
             f"📱 {item.account_count} | "
             f"🤖 {item.auto_reply_count} | "
-            f"{fm_icon} | {premium_icon}\n"
+            f"{fm_icon} | {activity_icon}\n"
             f"    👥 Referral: {item.referral_count}\n"
         )
 
@@ -298,7 +300,7 @@ async def _render_user_detail(
         f"<b>{detail.auto_reply_count}</b> "
         f"({detail.active_auto_reply_count} faol)\n"
         f"1️⃣ First Message: {first_message_label}\n"
-        f"⭐ Premium: {detail.premium_status}\n"
+        f"⚡ Faollik: {detail.activity_status}\n"
         f"{referral_line}"
     )
 
@@ -340,38 +342,50 @@ async def _render_first_message_text() -> str:
     )
 
 
-async def _render_premium_text() -> str:
-    stats = await get_premium_stats()
+async def _render_activity_text() -> str:
+    stats = await get_activity_stats()
 
     return (
-        "⭐ <b>PREMIUM</b>\n\n"
-        f"⭐ Premium Users: <b>{stats.total_premium}</b>\n"
-        f"🟢 Active Premium: <b>{stats.active_premium}</b>\n"
-        f"⏳ Expiring Soon (7 kun ichida): "
+        "⚡ <b>FAOLLIK</b>\n\n"
+        f"🎁 Trial (faol): <b>{stats.trial_users}</b>\n"
+        f"🟢 Pullik Faollik (faol): "
+        f"<b>{stats.active_paid_users}</b>\n"
+        f"⏳ Tez orada tugaydi (7 kun ichida): "
         f"<b>{stats.expiring_soon}</b>\n"
-        f"💰 Revenue: <b>{stats.revenue:.2f} {stats.currency}</b>"
+        f"💰 Tasdiqlangan tushum: "
+        f"<b>${stats.approved_revenue:.2f}</b>"
     )
 
 
 async def _render_payments_text() -> str:
     stats = await get_payment_stats()
+    rate = await get_exchange_rate()
 
-    if stats.revenue_by_currency:
-        revenue_lines = "\n".join(
-            f"   • {amount:.2f} {currency}"
-            for currency, amount in stats.revenue_by_currency
+    if stats.package_breakdown:
+        package_lines = "\n".join(
+            f"   {item.label}: {item.count}"
+            for item in stats.package_breakdown
         )
     else:
-        revenue_lines = "   • 0"
+        package_lines = "   —"
 
     return (
-        "💳 <b>PAYMENTS</b>\n\n"
-        f"Jami to'lovlar: <b>{stats.total}</b>\n"
-        f"✅ Successful: <b>{stats.successful}</b>\n"
-        f"⏳ Pending: <b>{stats.pending}</b>\n"
-        f"❌ Failed: <b>{stats.failed}</b>\n\n"
-        f"💰 Umumiy daromad:\n{revenue_lines}"
-    )
+        "💳 <b>TO'LOVLAR STATISTIKASI</b>\n\n"
+        f"📊 Jami: <b>{stats.total}</b>\n"
+        f"⏳ Kutilmoqda: <b>{stats.pending}</b>\n"
+        f"✅ Tasdiqlangan: <b>{stats.approved}</b>\n"
+        f"❌ Rad etilgan: <b>{stats.rejected}</b>\n\n"
+        f"💰 <b>Tasdiqlangan tushum:</b>\n"
+        f"${stats.approved_revenue:.2f}\n\n"
+        f"📦 <b>Paketlar:</b>\n{package_lines}\n\n"
+        f"📅 Bugun: 💵 ${stats.today_revenue:.2f} "
+        f"({stats.today_count} ta)\n"
+        f"📅 Shu oy: {stats.month_count} ta\n\n"
+        f"💱 <b>USD → UZS kursi:</b> "
+        f"{rate.rate:,.0f} ({rate.source})\n"
+        f"🕐 Yangilangan: "
+        f"{rate.fetched_at:%d.%m.%Y %H:%M} UTC"
+    ).replace(",", " ")
 
 
 async def _render_security_text() -> str:
@@ -711,17 +725,17 @@ async def admin_first_message(callback: CallbackQuery) -> None:
 
 
 # ============================================================
-# 6.4 PREMIUM
+# 6.4 FAOLLIK (ACTIVITY)
 # ============================================================
 
-@router.callback_query(F.data == "admin:premium")
-async def admin_premium(callback: CallbackQuery) -> None:
+@router.callback_query(F.data == "admin:activity")
+async def admin_activity(callback: CallbackQuery) -> None:
     if not await _guard_admin_callback(callback):
         return
 
     await callback.answer()
 
-    text = await _render_premium_text()
+    text = await _render_activity_text()
 
     await _safe_edit(
         callback,

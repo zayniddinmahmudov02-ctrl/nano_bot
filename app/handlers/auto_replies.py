@@ -11,7 +11,6 @@ from app.database import AsyncSessionLocal
 from app.database.models import (
     AutoReply,
     AutoReplyKeyword,
-    Referral,
     TelegramAccount,
 )
 from app.keyboards.auto_reply import (
@@ -75,37 +74,27 @@ TOO_LARGE_TEXT = (
 # ============================================================
 # LIMIT
 # ============================================================
+#
+# MUHIM: Referral orqali beriladigan bonus/tier tizimi olib
+# tashlandi (14-bo'lim — Referral tizimi vaqtincha o'chirilgan).
+# Auto Reply soni endi barcha foydalanuvchilar uchun bitta
+# qat'iy (flat) limit bilan cheklanadi — botdan foydalanish
+# huquqining o'zi Faollik (trial/pullik) tizimi orqali
+# boshqariladi (qarang: app/services/activity_service.py).
+
+AUTO_REPLY_LIMIT_DEFAULT = 10
+
 
 async def get_auto_reply_limit(
     session,
     user_id: int,
 ) -> int | None:
     """
-    None = unlimited.
-
-    0-9 referrals  -> 3
-    10-29           -> 10
-    30-49           -> 20
-    50+             -> unlimited
+    None = unlimited. Hozircha barcha foydalanuvchilar uchun
+    bitta flat limit qaytariladi.
     """
 
-    result = await session.execute(
-        select(func.coalesce(Referral.referral_count, 0))
-        .where(Referral.user_id == user_id)
-    )
-
-    referral_count = result.scalar_one()
-
-    if referral_count >= 50:
-        return None
-
-    if referral_count >= 30:
-        return 20
-
-    if referral_count >= 10:
-        return 10
-
-    return 3
+    return AUTO_REPLY_LIMIT_DEFAULT
 
 
 # ============================================================

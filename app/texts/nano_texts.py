@@ -130,13 +130,6 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "ℹ️ Nano-Info",
         "de": "ℹ️ Nano-Info",
     },
-    "btn_referrals": {
-        "uz": "👥 Referallar",
-        "ru": "👥 Рефералы",
-        "en": "👥 Referrals",
-        "de": "👥 Empfehlungen",
-    },
-
     # --------------------------------------------------
     # NANO-AGENT
     # --------------------------------------------------
@@ -262,11 +255,11 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "🌐 Language",
         "de": "🌐 Sprache",
     },
-    "btn_settings_premium": {
-        "uz": "💎 Premium",
-        "ru": "💎 Premium",
-        "en": "💎 Premium",
-        "de": "💎 Premium",
+    "btn_settings_activity": {
+        "uz": "⚡ Faollik",
+        "ru": "⚡ Активность",
+        "en": "⚡ Activity",
+        "de": "⚡ Aktivität",
     },
     "btn_settings_profile": {
         "uz": "👤 Shaxsiy ma'lumotlar",
@@ -294,25 +287,177 @@ _TEXTS: Dict[str, Dict[str, str]] = {
     },
 
     # --------------------------------------------------
-    # PREMIUM
+    # FAOLLIK (ACTIVITY) — Premium o'rnini bosuvchi tizim
     # --------------------------------------------------
-    "premium_title": {
-        "uz": "💎 <b>Premium</b>",
-        "ru": "💎 <b>Premium</b>",
-        "en": "💎 <b>Premium</b>",
-        "de": "💎 <b>Premium</b>",
+    "activity_title": {
+        "uz": "⚡ <b>Faollik</b>",
+        "ru": "⚡ <b>Активность</b>",
+        "en": "⚡ <b>Activity</b>",
+        "de": "⚡ <b>Aktivität</b>",
     },
-    "premium_status_free": {
-        "uz": "Joriy status:\n🟢 Free",
-        "ru": "Текущий статус:\n🟢 Free",
-        "en": "Current status:\n🟢 Free",
-        "de": "Aktueller Status:\n🟢 Free",
+    "activity_status_trial": {
+        "uz": "Joriy status:\n🎁 Bepul sinov muddati (trial)",
+        "ru": "Текущий статус:\n🎁 Бесплатный пробный период",
+        "en": "Current status:\n🎁 Free trial",
+        "de": "Aktueller Status:\n🎁 Kostenlose Testphase",
     },
-    "premium_status_active": {
-        "uz": "Joriy status:\n💎 Premium (faol)",
-        "ru": "Текущий статус:\n💎 Premium (активен)",
-        "en": "Current status:\n💎 Premium (active)",
-        "de": "Aktueller Status:\n💎 Premium (aktiv)",
+    "activity_status_active": {
+        "uz": "Joriy status:\n🟢 Faollik yoqilgan",
+        "ru": "Текущий статус:\n🟢 Активность включена",
+        "en": "Current status:\n🟢 Activity active",
+        "de": "Aktueller Status:\n🟢 Aktivität aktiv",
+    },
+    "activity_status_expired": {
+        "uz": "Joriy status:\n🔴 Faollik muddati tugagan",
+        "ru": "Текущий статус:\n🔴 Срок активности истёк",
+        "en": "Current status:\n🔴 Activity expired",
+        "de": "Aktueller Status:\n🔴 Aktivität abgelaufen",
+    },
+    "activity_expiry_line": {
+        "uz": "📅 Amal qilish muddati: <b>{date}</b>",
+        "ru": "📅 Действует до: <b>{date}</b>",
+        "en": "📅 Valid until: <b>{date}</b>",
+        "de": "📅 Gültig bis: <b>{date}</b>",
+    },
+    "activity_intro": {
+        "uz": "🎁 7 kunlik bepul foydalanish muddati tugagach "
+        "botdan foydalanishni davom ettirish uchun Faollik "
+        "paketini tanlang.\n\n📦 Paketni tanlang:",
+        "ru": "🎁 После окончания 7-дневного бесплатного "
+        "периода выберите пакет Активности, чтобы продолжить "
+        "пользоваться ботом.\n\n📦 Выберите пакет:",
+        "en": "🎁 Once the 7-day free trial ends, choose an "
+        "Activity package to keep using the bot.\n\n"
+        "📦 Choose a package:",
+        "de": "🎁 Nach Ablauf der 7-tägigen kostenlosen "
+        "Testphase wählen Sie ein Aktivitätspaket, um den Bot "
+        "weiter zu nutzen.\n\n📦 Paket wählen:",
+    },
+    "btn_package_1m": {
+        "uz": "1 oy — $1",
+        "ru": "1 месяц — $1",
+        "en": "1 month — $1",
+        "de": "1 Monat — $1",
+    },
+    "btn_package_3m": {
+        "uz": "3 oy — $2.50",
+        "ru": "3 месяца — $2.50",
+        "en": "3 months — $2.50",
+        "de": "3 Monate — $2.50",
+    },
+    "btn_package_6m": {
+        "uz": "6 oy — $4",
+        "ru": "6 месяцев — $4",
+        "en": "6 months — $4",
+        "de": "6 Monate — $4",
+    },
+    "btn_package_1y": {
+        "uz": "1 yil — $6",
+        "ru": "1 год — $6",
+        "en": "1 year — $6",
+        "de": "1 Jahr — $6",
+    },
+    "btn_activity_buy": {
+        "uz": "💳 Sotib olish",
+        "ru": "💳 Купить",
+        "en": "💳 Buy",
+        "de": "💳 Kaufen",
+    },
+    "activity_package_detail": {
+        "uz": "⚡ <b>{label}</b>\n\n💵 ${usd:.2f}\n"
+        "🇺🇿 ~{uzs} so'm",
+        "ru": "⚡ <b>{label}</b>\n\n💵 ${usd:.2f}\n"
+        "🇺🇿 ~{uzs} сум",
+        "en": "⚡ <b>{label}</b>\n\n💵 ${usd:.2f}\n"
+        "🇺🇿 ~{uzs} UZS",
+        "de": "⚡ <b>{label}</b>\n\n💵 ${usd:.2f}\n"
+        "🇺🇿 ~{uzs} UZS",
+    },
+    "activity_payment_instructions": {
+        "uz": "💳 <b>To'lovni amalga oshiring.</b>\n\n"
+        "📸 To'lov chekini/skrinshotini shu chatga yuboring.",
+        "ru": "💳 <b>Совершите оплату.</b>\n\n"
+        "📸 Отправьте чек/скриншот оплаты в этот чат.",
+        "en": "💳 <b>Complete the payment.</b>\n\n"
+        "📸 Send the payment receipt/screenshot in this chat.",
+        "de": "💳 <b>Zahlung abschließen.</b>\n\n"
+        "📸 Senden Sie den Zahlungsbeleg/Screenshot in diesen "
+        "Chat.",
+    },
+    "activity_receipt_invalid": {
+        "uz": "❌ Iltimos, to'lov chekini rasm yoki hujjat "
+        "(fayl) ko'rinishida yuboring.",
+        "ru": "❌ Пожалуйста, отправьте чек оплаты в виде "
+        "фото или файла.",
+        "en": "❌ Please send the payment receipt as a photo "
+        "or a document.",
+        "de": "❌ Bitte senden Sie den Zahlungsbeleg als Foto "
+        "oder Dokument.",
+    },
+    "activity_request_sent": {
+        "uz": "✅ <b>To'lov so'rovingiz yuborildi!</b>\n\n"
+        "⏳ Admin tekshirib chiqqach, Faollik "
+        "avtomatik yoqiladi. Iltimos kuting.",
+        "ru": "✅ <b>Ваш запрос на оплату отправлен!</b>\n\n"
+        "⏳ После проверки администратором Активность будет "
+        "включена автоматически. Пожалуйста, подождите.",
+        "en": "✅ <b>Your payment request has been sent!</b>\n\n"
+        "⏳ Once an admin reviews it, Activity will be enabled "
+        "automatically. Please wait.",
+        "de": "✅ <b>Ihre Zahlungsanfrage wurde gesendet!</b>\n\n"
+        "⏳ Nach Prüfung durch einen Admin wird die Aktivität "
+        "automatisch aktiviert. Bitte warten.",
+    },
+    "activity_approved_notification": {
+        "uz": "✅ <b>To'lovingiz tasdiqlandi!</b>\n\n"
+        "⚡ Faollik: {package}\n"
+        "📅 Amal qilish muddati: {expiry}\n\n"
+        "Botdan foydalanishingiz mumkin.",
+        "ru": "✅ <b>Ваш платёж подтверждён!</b>\n\n"
+        "⚡ Активность: {package}\n"
+        "📅 Действует до: {expiry}\n\n"
+        "Вы можете пользоваться ботом.",
+        "en": "✅ <b>Your payment has been approved!</b>\n\n"
+        "⚡ Activity: {package}\n"
+        "📅 Valid until: {expiry}\n\n"
+        "You can now use the bot.",
+        "de": "✅ <b>Ihre Zahlung wurde bestätigt!</b>\n\n"
+        "⚡ Aktivität: {package}\n"
+        "📅 Gültig bis: {expiry}\n\n"
+        "Sie können den Bot jetzt nutzen.",
+    },
+    "activity_rejected_notification": {
+        "uz": "❌ <b>To'lovingiz rad etildi.</b>\n\n"
+        "Savollar bo'lsa, qo'llab-quvvatlash bilan bog'laning "
+        "yoki to'lovni qayta yuboring.",
+        "ru": "❌ <b>Ваш платёж отклонён.</b>\n\n"
+        "Если есть вопросы, свяжитесь с поддержкой или "
+        "отправьте платёж повторно.",
+        "en": "❌ <b>Your payment was rejected.</b>\n\n"
+        "If you have questions, contact support or resend the "
+        "payment.",
+        "de": "❌ <b>Ihre Zahlung wurde abgelehnt.</b>\n\n"
+        "Bei Fragen wenden Sie sich an den Support oder senden "
+        "Sie die Zahlung erneut.",
+    },
+    "access_denied_title": {
+        "uz": "❌ <b>Faollik muddati tugagan.</b>\n\n"
+        "⚡ Botdan foydalanishni davom ettirish uchun Faollik "
+        "paketini tanlang.",
+        "ru": "❌ <b>Срок активности истёк.</b>\n\n"
+        "⚡ Чтобы продолжить пользоваться ботом, выберите пакет "
+        "Активности.",
+        "en": "❌ <b>Your activity period has expired.</b>\n\n"
+        "⚡ Choose an Activity package to keep using the bot.",
+        "de": "❌ <b>Ihr Aktivitätszeitraum ist abgelaufen.</b>"
+        "\n\n⚡ Wählen Sie ein Aktivitätspaket, um den Bot "
+        "weiter zu nutzen.",
+    },
+    "btn_activity_open": {
+        "uz": "⚡ Faollik",
+        "ru": "⚡ Активность",
+        "en": "⚡ Activity",
+        "de": "⚡ Aktivität",
     },
 
     # --------------------------------------------------
