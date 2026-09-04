@@ -6,7 +6,11 @@ from typing import Optional, Tuple
 
 from aiogram.types import Message as BotMessage
 from telethon import TelegramClient
-from telethon.errors import RPCError
+from telethon.errors import (
+    FileReferenceExpiredError,
+    FileReferenceInvalidError,
+    RPCError,
+)
 from telethon.tl.types import MessageMediaWebPage, PeerChannel
 
 from app.config import BOT_USERNAME
@@ -182,6 +186,18 @@ async def _fetch_bot_chat_message(
     )
 
 
+# Faqat HAQIQATAN "fayl juda katta/qismlari yaroqsiz" degan
+# ma'noni anglatadigan Telegram xatolari — boshqa HAR QANDAY
+# RPCError (masalan file_reference eskirishi) bunga
+# KIRITILMAYDI, aks holda diagnostika chalkashib qoladi.
+_TOO_LARGE_ERROR_TYPES = (
+    "FilePartsInvalidError",
+    "FilePartTooBigError",
+    "FilePartLengthInvalidError",
+    "FilePartSizeInvalidError",
+)
+
+
 async def send_post_to_storage(
     *,
     telethon_client: TelegramClient,
@@ -213,114 +229,239 @@ async def send_post_to_storage(
     HAQIQIY MEDIA EMAS — `send_file()`ga uzatilmaydi, aks holda
     xatolik beradi. Bunday holatda va oddiy matn xabarlarida
     postning matni oddiy text xabar sifatida yuboriladi.
+
+    MUHIM (diagnostika — 11-bo'lim): har bir bosqich ALOHIDA
+    try/except bilan o'ralgan va aniq bosqich nomi + exception
+    TURI (xabar mazmuni/token/session'siz) bilan log yoziladi —
+    "Postni saqlashda xatolik" degan umumiy xabar ortida endi
+    aniq texnik sabab har doim serverga yoziladi.
     """
 
+    log_ctx = (
+        "user_id=%s, account_id=%s, source_message_id=%s, "
+        "storage_chat_id=%s"
+    )
+    log_args = (user_id, account_id, source_message_id, storage_chat_id)
+
+    # ------------------------------------------------------
+    # 1-BOSQICH: Storage Channel entity'sini topish
+    # ------------------------------------------------------
     try:
         storage_entity = await telethon_client.get_entity(
             PeerChannel(storage_chat_id)
         )
+    except Exception as exc:
+        logger.error(
+            "storage_save FAILED [resolve_storage_entity]: "
+            "%s: %s (" + log_ctx + ")",
+            type(exc).__name__,
+            exc,
+            *log_args,
+            exc_info=exc,
+        )
+        return None
 
+    # ------------------------------------------------------
+    # 2-BOSQICH: Source xabarni Telethon orqali topish
+    # ------------------------------------------------------
+    try:
         source_message = await _fetch_bot_chat_message(
             telethon_client,
             source_message_id,
         )
-
-        if source_message is None or source_message.id is None:
-            logger.warning(
-                "Source xabar Telethon orqali topilmadi: "
-                "message_id=%s",
-                source_message_id,
-            )
-            return None
-
-        has_real_media = (
-            source_message.media is not None
-            and not isinstance(
-                source_message.media, MessageMediaWebPage
-            )
+    except Exception as exc:
+        logger.error(
+            "storage_save FAILED [fetch_source_message]: "
+            "%s: %s (" + log_ctx + ")",
+            type(exc).__name__,
+            exc,
+            *log_args,
+            exc_info=exc,
         )
+        return None
 
-        if has_real_media:
-            media_type = type(source_message.media).__name__
+    if source_message is None or source_message.id is None:
+        logger.warning(
+            "storage_save FAILED [fetch_source_message]: "
+            "source xabar Telethon orqali topilmadi (" + log_ctx + ")",
+            *log_args,
+        )
+        return None
 
-            sent = await telethon_client.send_file(
-                storage_entity,
-                source_message.media,
-                caption=source_message.message or None,
-            )
-        else:
-            media_type = "text"
+    has_real_media = (
+        source_message.media is not None
+        and not isinstance(
+            source_message.media, MessageMediaWebPage
+        )
+    )
 
-            text = source_message.message or fallback_text
+    media_type = (
+        type(source_message.media).__name__
+        if has_real_media
+        else "text"
+    )
 
-            if not text:
-                logger.warning(
-                    "Source xabarda na media, na matn topildi: "
-                    "message_id=%s",
-                    source_message_id,
+    # ------------------------------------------------------
+    # 3-BOSQICH: Storage Channel'ga yuborish (1 marta qayta
+    # urinish bilan — agar file_reference eskirgan bo'lsa,
+    # source xabar QAYTA olinadi va YANGI file_reference bilan
+    # yana bir bor urinib ko'riladi).
+    # ------------------------------------------------------
+    sent = None
+
+    for attempt in (1, 2):
+        try:
+            if has_real_media:
+                sent = await telethon_client.send_file(
+                    storage_entity,
+                    source_message.media,
+                    caption=source_message.message or None,
+                )
+            else:
+                text = source_message.message or fallback_text
+
+                if not text:
+                    logger.warning(
+                        "storage_save FAILED [send]: source "
+                        "xabarda na media, na matn topildi ("
+                        + log_ctx + ")",
+                        *log_args,
+                    )
+                    return None
+
+                sent = await telethon_client.send_message(
+                    storage_entity,
+                    text,
+                )
+
+            break
+
+        except (
+            FileReferenceExpiredError,
+            FileReferenceInvalidError,
+        ) as exc:
+            if attempt == 2:
+                logger.error(
+                    "storage_save FAILED [send] (file_reference "
+                    "2-urinishdan keyin ham eskirgan): %s: %s ("
+                    + log_ctx + ")",
+                    type(exc).__name__,
+                    exc,
+                    *log_args,
                 )
                 return None
 
-            sent = await telethon_client.send_message(
-                storage_entity,
-                text,
+            logger.warning(
+                "storage_save: file_reference eskirgan, source "
+                "xabar qayta olinmoqda (1-urinish muvaffaqiyatsiz): "
+                "%s (" + log_ctx + ")",
+                type(exc).__name__,
+                *log_args,
             )
 
-        # MUHIM (spec 6-bo'lim — post-save validation): DARHOL
-        # qayta o'qib, xabar haqiqatan Storage Channel'da
-        # mavjudligini tasdiqlaymiz. Tasdiqlanmasa — DB'ga
-        # HECH QACHON fake ID yozilmaydi.
+            try:
+                source_message = await _fetch_bot_chat_message(
+                    telethon_client,
+                    source_message_id,
+                )
+            except Exception as refetch_exc:
+                logger.error(
+                    "storage_save FAILED [refetch_after_stale_ref]: "
+                    "%s: %s (" + log_ctx + ")",
+                    type(refetch_exc).__name__,
+                    refetch_exc,
+                    *log_args,
+                )
+                return None
+
+            if source_message is None:
+                logger.error(
+                    "storage_save FAILED [refetch_after_stale_ref]: "
+                    "source xabar qayta olinganda topilmadi ("
+                    + log_ctx + ")",
+                    *log_args,
+                )
+                return None
+
+        except RPCError as exc:
+            if type(exc).__name__ in _TOO_LARGE_ERROR_TYPES:
+                logger.error(
+                    "storage_save FAILED [send]: fayl juda katta/"
+                    "qismlari yaroqsiz: %s: %s (" + log_ctx + ")",
+                    type(exc).__name__,
+                    exc,
+                    *log_args,
+                )
+                raise StoragePostTooLarge() from None
+
+            # MUHIM: boshqa HAR QANDAY RPCError endi "fayl juda
+            # katta" deb NOTO'G'RI belgilanmaydi — aniq exception
+            # turi bilan logga yoziladi, foydalanuvchiga esa
+            # umumiy "qayta urinib ko'ring" xabari ko'rsatiladi.
+            logger.error(
+                "storage_save FAILED [send]: Telegram RPC xatosi: "
+                "%s: %s (" + log_ctx + ")",
+                type(exc).__name__,
+                exc,
+                *log_args,
+            )
+            return None
+
+        except Exception as exc:
+            logger.error(
+                "storage_save FAILED [send]: %s: %s (" + log_ctx + ")",
+                type(exc).__name__,
+                exc,
+                *log_args,
+                exc_info=exc,
+            )
+            return None
+
+    if sent is None:
+        return None
+
+    # ------------------------------------------------------
+    # 4-BOSQICH: post-save validation (spec 6/7-bo'lim) — DARHOL
+    # qayta o'qib, xabar haqiqatan Storage Channel'da mavjudligini
+    # tasdiqlaymiz. Tasdiqlanmasa — DB'ga HECH QACHON fake ID
+    # yozilmaydi.
+    # ------------------------------------------------------
+    try:
         verified = await telethon_client.get_messages(
             storage_entity,
             ids=sent.id,
         )
-
-        if verified is None:
-            logger.error(
-                "storage_save: post-save validation "
-                "muvaffaqiyatsiz — Storage'da tasdiqlanmadi: "
-                "user_id=%s, account_id=%s, "
-                "source_message_id=%s, storage_chat_id=%s, "
-                "storage_message_id=%s",
-                user_id,
-                account_id,
-                source_message_id,
-                storage_chat_id,
-                sent.id,
-            )
-            return None
-
-        logger.info(
-            "storage_save: user_id=%s, account_id=%s, "
-            "source_message_id=%s, storage_chat_id=%s, "
-            "storage_message_id=%s, media_type=%s",
-            user_id,
-            account_id,
-            source_message_id,
-            storage_chat_id,
+    except Exception as exc:
+        logger.error(
+            "storage_save FAILED [verify]: %s: %s, "
+            "storage_message_id=%s (" + log_ctx + ")",
+            type(exc).__name__,
+            exc,
             sent.id,
-            media_type,
-        )
-
-        return int(sent.id)
-
-    except RPCError:
-        # MUHIM: Telegram serveridan qaytgan RPC xatosi (masalan
-        # o'ta katta/buzilgan fayl qismlari) — foydalanuvchiga
-        # tushunarli xabar berish uchun aniq turga o'giriladi.
-        logger.exception(
-            "Storage kanaliga post joylashda Telegram RPC "
-            "xatosi: chat_id=%s",
-            storage_chat_id,
-        )
-        raise StoragePostTooLarge() from None
-
-    except Exception:
-        logger.exception(
-            "Storage kanaliga post joylashda xatolik: chat_id=%s",
-            storage_chat_id,
+            *log_args,
+            exc_info=exc,
         )
         return None
+
+    if verified is None:
+        logger.error(
+            "storage_save FAILED [verify]: post-save validation "
+            "muvaffaqiyatsiz — Storage'da tasdiqlanmadi, "
+            "storage_message_id=%s (" + log_ctx + ")",
+            sent.id,
+            *log_args,
+        )
+        return None
+
+    logger.info(
+        "storage_save OK: storage_message_id=%s, media_type=%s ("
+        + log_ctx + ")",
+        sent.id,
+        media_type,
+        *log_args,
+    )
+
+    return int(sent.id)
 
 
 # ============================================================
