@@ -6,12 +6,14 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -1169,6 +1171,146 @@ class AdminStatistics(Base):
     total_revenue: Mapped[float] = mapped_column(
         Numeric(12, 2),
         default=0,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+# ============================================================
+# UNANSWERED CHATS
+# ============================================================
+#
+# "Javob berilmagan chatlar" monitoringi — bu CONVERSATION
+# CONTENT saqlash tizimi EMAS. Faqat texnik metadata saqlanadi:
+# peer ID, vaqt belgilari, holat. Xabar matni/tarixi hech qachon
+# bu jadvalga (yoki boshqa hech qayerga) yozilmaydi.
+
+class UnansweredChat(Base):
+    __tablename__ = "unanswered_chats"
+
+    __table_args__ = (
+        # Bir peer uchun bir vaqtning o'zida faqat BITTA faol
+        # (UNANSWERED) yozuv bo'lishi mumkin — DB darajasidagi
+        # himoya (ilova darajasidagi "avval tekshir, keyin
+        # yarat" logikasidan tashqari, race condition'lardan
+        # ham himoya qiladi). ANSWERED holatidagi eski yozuvlar
+        # bu cheklovga kirmaydi — bitta peer uchun tarixda
+        # bir nechta ANSWERED sikli bo'lishi mumkin.
+        Index(
+            "uq_unanswered_chats_active_peer",
+            "telegram_account_id",
+            "peer_id",
+            unique=True,
+            postgresql_where=text("status = 'UNANSWERED'"),
+        ),
+        Index(
+            "ix_unanswered_chats_account_status",
+            "telegram_account_id",
+            "status",
+        ),
+        # MUHIM: `waiting_since` uchun alohida Index(...) shart
+        # emas — quyida ustun darajasida `index=True` orqali
+        # aynan shu nom bilan avtomatik yaratiladi. Ikkalasini
+        # ham qo'shish "relation already exists" xatosiga olib
+        # keladi.
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    telegram_account_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("telegram_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    peer_id: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        index=True,
+    )
+
+    peer_type: Mapped[str] = mapped_column(
+        String(20),
+        default="user",
+        server_default="user",
+        nullable=False,
+    )
+
+    # MUHIM (Privacy): faqat ko'rsatish (display) uchun ism/
+    # username — conversation content EMAS.
+    peer_name: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    peer_username: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    # Joriy javobsizlik "sikli" boshlangan birinchi outgoing
+    # xabar vaqti.
+    first_bot_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    # Saralash uchun ishlatiladigan maydon — joriy sikl uchun
+    # doim `first_bot_message_at`ga teng (bot keyingi xabar
+    # yuborsa ham qayta boshlanmaydi, spec 7-bo'lim qoidasi).
+    waiting_since: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    # Shu peer'ga yuborilgan ENG OXIRGI outgoing xabar vaqti
+    # (bot bir necha marta yozgan bo'lishi mumkin).
+    last_bot_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    user_replied_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # UNANSWERED | ANSWERED
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="UNANSWERED",
+        server_default="UNANSWERED",
+        nullable=False,
+        index=True,
+    )
+
+    reminder_sent: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+
+    reminder_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
 

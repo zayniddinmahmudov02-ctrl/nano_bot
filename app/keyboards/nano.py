@@ -1,3 +1,5 @@
+from typing import Optional
+
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -129,6 +131,12 @@ def nano_agent_menu_keyboard(
                 InlineKeyboardButton(
                     text=t("btn_agent_first", lang),
                     callback_data="nano:agent:first",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("btn_agent_unanswered", lang),
+                    callback_data="nano:agent:unanswered",
                 ),
             ],
             [
@@ -477,6 +485,126 @@ def nano_stats_keyboard(
     )
 
 
+# ============================================================
+# JAVOB BERILMAGAN CHATLAR (UNANSWERED CHATS)
+# ============================================================
+#
+# MUHIM (spec 5-bo'lim): "Chatga o'tish" tugmasi FAQAT peer'ning
+# ochiq (public) username'i mavjud bo'lganda haqiqiy
+# `https://t.me/<username>` havolasiga ega bo'ladi — bu Telegram
+# tomonidan RASMAN kafolatlangan, universal, har doim ishlaydigan
+# yagona deep-link mexanizmi. Agar username yo'q bo'lsa — soxta/
+# ishonchsiz URL (masalan `tg://user?id=`, ko'p Telegram
+# klientlarida ishlamaydi va uchinchi tomon botidan ixtiyoriy
+# foydalanuvchiga to'g'ridan-to'g'ri ochilishi rasman kafolat-
+# lanmagan) YARATILMAYDI — o'rniga xavfsiz, halol fallback:
+# tugma bosilganda aniq tushuntirish bilan alert ko'rsatiladi.
+
+def _unanswered_chat_button(
+    *,
+    record_id: int,
+    peer_name: Optional[str],
+    peer_username: Optional[str],
+    peer_id: int,
+    lang: str,
+) -> InlineKeyboardButton:
+    label = peer_name or (
+        f"@{peer_username}" if peer_username else f"ID {peer_id}"
+    )
+
+    button_text = f"💬 {label}"[:64]
+
+    if peer_username:
+        return InlineKeyboardButton(
+            text=button_text,
+            url=f"https://t.me/{peer_username}",
+        )
+
+    return InlineKeyboardButton(
+        text=button_text,
+        callback_data=f"nano:agent:unanswered:nolink:{record_id}",
+    )
+
+
+def nano_unanswered_list_keyboard(
+    items: list,
+    page: int,
+    total_pages: int,
+    lang: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            _unanswered_chat_button(
+                record_id=item.id,
+                peer_name=item.peer_name,
+                peer_username=item.peer_username,
+                peer_id=item.peer_id,
+                lang=lang,
+            )
+        ]
+        for item in items
+    ]
+
+    if total_pages > 1:
+        pagination_row = []
+
+        if page > 1:
+            pagination_row.append(
+                InlineKeyboardButton(
+                    text="⬅️",
+                    callback_data=(
+                        f"nano:agent:unanswered:page:{page - 1}"
+                    ),
+                )
+            )
+
+        pagination_row.append(
+            InlineKeyboardButton(
+                text=f"{page}/{total_pages}",
+                callback_data="nano:noop",
+            )
+        )
+
+        if page < total_pages:
+            pagination_row.append(
+                InlineKeyboardButton(
+                    text="➡️",
+                    callback_data=(
+                        f"nano:agent:unanswered:page:{page + 1}"
+                    ),
+                )
+            )
+
+        rows.append(pagination_row)
+
+    rows.append(_back("nano:agent", lang))
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def nano_unanswered_reminder_keyboard(
+    *,
+    record_id: int,
+    peer_name: Optional[str],
+    peer_username: Optional[str],
+    peer_id: int,
+    lang: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                _unanswered_chat_button(
+                    record_id=record_id,
+                    peer_name=peer_name,
+                    peer_username=peer_username,
+                    peer_id=peer_id,
+                    lang=lang,
+                )
+            ]
+        ]
+    )
+
+
 __all__ = [
     "nano_main_reply_keyboard",
     "nano_main_menu_keyboard",
@@ -498,4 +626,6 @@ __all__ = [
     "nano_info_sub_keyboard",
     "nano_referrals_keyboard",
     "nano_stats_keyboard",
+    "nano_unanswered_list_keyboard",
+    "nano_unanswered_reminder_keyboard",
 ]

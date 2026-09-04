@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 
@@ -15,13 +16,27 @@ from app.services.activity_service import (
     is_trial_active,
 )
 from app.services.exchange_rate_service import refresh_exchange_rate
+from app.services.user_service import get_user_language
 
 logger = logging.getLogger(__name__)
 
 _scheduler: Optional[AsyncIOScheduler] = None
+_bot_instance: Optional[Bot] = None
 
 EXCHANGE_RATE_REFRESH_MINUTES = 360
 ACTIVITY_EXPIRY_SWEEP_MINUTES = 15
+UNANSWERED_REMINDER_SWEEP_MINUTES = 30
+
+
+def set_bot_instance(bot: Bot) -> None:
+    """
+    main.py startup vaqtida chaqiriladi — 24 soatlik "javob
+    berilmagan chat" eslatmalarini yuborish uchun Bot obyektiga
+    referens saqlanadi.
+    """
+
+    global _bot_instance
+    _bot_instance = bot
 
 
 def _now() -> datetime:
@@ -92,6 +107,90 @@ async def _job_sweep_expired_activity() -> None:
         )
 
 
+async def _job_send_unanswered_reminders() -> None:
+    """
+    24 soatdan ortiq javobsiz turgan chatlar uchun Nano-Bot
+    foydalanuvchisiga (akkaunt egasiga) BIR MARTA eslatma
+    yuboradi (spec 4/9-bo'lim).
+
+    MUHIM: bitta periodic job orqali BARCHA tegishli yozuvlar
+    qayta ishlanadi — har bir chat uchun alohida scheduler job
+    yaratilmaydi. Har bir yozuv uchun reminder faqat bir marta
+    yuboriladi (`reminder_sent` bayrog'i orqali) — spam bo'lmaydi.
+    Xabar matni/tarixi bu yerda ishlatilmaydi/saqlanmaydi —
+    faqat texnik metadata (ism/username/kutish vaqti).
+    """
+
+    if _bot_instance is None:
+        return
+
+    from app.keyboards.nano import nano_unanswered_reminder_keyboard
+    from app.services.unanswered_chat_service import (
+        get_due_reminders,
+        mark_reminder_sent,
+    )
+    from app.texts import t
+
+    try:
+        targets = await get_due_reminders()
+    except Exception:
+        logger.exception(
+            "Scheduler: javobsiz chat eslatmalarini olishda "
+            "xatolik."
+        )
+        return
+
+    for target in targets:
+        try:
+            async with AsyncSessionLocal() as session:
+                lang = await get_user_language(
+                    session,
+                    target.owner_telegram_id,
+                )
+
+            display_name = (
+                target.peer_name
+                or (
+                    f"@{target.peer_username}"
+                    if target.peer_username
+                    else f"ID {target.peer_id}"
+                )
+            )
+
+            text = (
+                f"{t('unanswered_reminder_title', lang)}\n\n"
+                f"{t('unanswered_reminder_body', lang)}\n\n"
+                f"{t('unanswered_reminder_peer_line', lang, name=display_name)}"
+            )
+
+            keyboard = nano_unanswered_reminder_keyboard(
+                record_id=target.record_id,
+                peer_name=target.peer_name,
+                peer_username=target.peer_username,
+                peer_id=target.peer_id,
+                lang=lang,
+            )
+
+            await _bot_instance.send_message(
+                target.owner_telegram_id,
+                text,
+                reply_markup=keyboard,
+            )
+
+            await mark_reminder_sent(target.record_id)
+
+        except Exception:
+            # MUHIM: bitta userga yuborish muvaffaqiyatsiz
+            # bo'lsa ham (masalan bot bloklangan), qolganlar
+            # uchun jarayon davom etadi — reminder_sent shu
+            # holatda belgilanmaydi, keyingi sikl qayta urinadi.
+            logger.exception(
+                "Javobsiz chat eslatmasini yuborishda xatolik "
+                "(record_id=%s).",
+                target.record_id,
+            )
+
+
 def create_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="UTC")
 
@@ -109,6 +208,15 @@ def create_scheduler() -> AsyncIOScheduler:
         "interval",
         minutes=ACTIVITY_EXPIRY_SWEEP_MINUTES,
         id="sweep_expired_activity",
+        next_run_time=_now(),
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        _job_send_unanswered_reminders,
+        "interval",
+        minutes=UNANSWERED_REMINDER_SWEEP_MINUTES,
+        id="send_unanswered_reminders",
         next_run_time=_now(),
         replace_existing=True,
     )
@@ -150,6 +258,7 @@ def is_scheduler_running() -> bool:
 
 
 __all__ = [
+    "set_bot_instance",
     "start_scheduler",
     "stop_scheduler",
     "is_scheduler_running",

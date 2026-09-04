@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Optional, Tuple
 
 from telethon.tl.types import User as TelethonUser
 
@@ -123,7 +124,45 @@ async def validate_private_user_event(
     return True
 
 
+async def get_peer_display_info(
+    event,
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Peer'ning DISPLAY (ko'rsatish) uchun ism va username'ini
+    qaytaradi — "Javob berilmagan chatlar" ro'yxatida
+    ko'rsatish uchun (spec 11-bo'lim).
+
+    MUHIM (Privacy): faqat ism/username — xabar matni yoki
+    boshqa conversation content HECH QACHON qaytarilmaydi/
+    saqlanmaydi. Telethon entity keshidan olinadi (odatda
+    tarmoqqa qayta chiqmaydi, chunki `validate_private_user_event`
+    allaqachon shu sender uchun `get_sender()`ni chaqirgan).
+    """
+
+    try:
+        sender = await event.get_sender()
+    except Exception:
+        return None, None
+
+    if sender is None:
+        return None, None
+
+    name = " ".join(
+        part
+        for part in (
+            getattr(sender, "first_name", None),
+            getattr(sender, "last_name", None),
+        )
+        if part
+    ).strip()
+
+    username = getattr(sender, "username", None)
+
+    return (name or None), username
+
+
 __all__ = [
     "is_private_incoming_event",
     "validate_private_user_event",
+    "get_peer_display_info",
 ]

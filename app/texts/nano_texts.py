@@ -157,6 +157,12 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "1️⃣ First message",
         "de": "1️⃣ Erste Nachricht",
     },
+    "btn_agent_unanswered": {
+        "uz": "💬 Javob berilmagan chatlar",
+        "ru": "💬 Чаты без ответа",
+        "en": "💬 Unanswered chats",
+        "de": "💬 Unbeantwortete Chats",
+    },
     "btn_agent_stats": {
         "uz": "📊 Statistikalar",
         "ru": "📊 Статистика",
@@ -676,6 +682,104 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "ru": "📊 Реферальная статистика",
         "en": "📊 Referral statistics",
         "de": "📊 Empfehlungsstatistik",
+    },
+
+    # --------------------------------------------------
+    # JAVOB BERILMAGAN CHATLAR (UNANSWERED CHATS)
+    # --------------------------------------------------
+    "unanswered_list_title": {
+        "uz": "💬 <b>JAVOB BERILMAGAN CHATLAR</b>",
+        "ru": "💬 <b>ЧАТЫ БЕЗ ОТВЕТА</b>",
+        "en": "💬 <b>UNANSWERED CHATS</b>",
+        "de": "💬 <b>UNBEANTWORTETE CHATS</b>",
+    },
+    "unanswered_list_empty": {
+        "uz": "✅ Hozircha javob berilmagan chatlar yo'q.",
+        "ru": "✅ Пока нет чатов без ответа.",
+        "en": "✅ There are no unanswered chats right now.",
+        "de": "✅ Derzeit gibt es keine unbeantworteten Chats.",
+    },
+    "unanswered_list_hint": {
+        "uz": "Eng uzoq vaqt javobsiz qolgan chat birinchi "
+        "ko'rsatiladi.",
+        "ru": "Сначала показывается чат, который дольше всех "
+        "без ответа.",
+        "en": "The longest-waiting chat is shown first.",
+        "de": "Der am längsten wartende Chat wird zuerst "
+        "angezeigt.",
+    },
+    "unanswered_item_line": {
+        "uz": "{emoji} {duration}\n👤 {name}",
+        "ru": "{emoji} {duration}\n👤 {name}",
+        "en": "{emoji} {duration}\n👤 {name}",
+        "de": "{emoji} {duration}\n👤 {name}",
+    },
+    "unanswered_nolink_alert": {
+        "uz": "ℹ️ Bu foydalanuvchida ochiq (public) username "
+        "mavjud emas, shu sabab to'g'ridan-to'g'ri havola "
+        "yaratib bo'lmaydi.\n\nTelegram ilovangizda uni qo'lda "
+        "qidiring.",
+        "ru": "ℹ️ У этого пользователя нет публичного username, "
+        "поэтому создать прямую ссылку невозможно.\n\nНайдите "
+        "его вручную в приложении Telegram.",
+        "en": "ℹ️ This user has no public username, so a "
+        "direct link cannot be created.\n\nPlease search for "
+        "them manually in your Telegram app.",
+        "de": "ℹ️ Dieser Nutzer hat keinen öffentlichen "
+        "Benutzernamen, daher kann kein direkter Link erstellt "
+        "werden.\n\nBitte suchen Sie manuell in Ihrer "
+        "Telegram-App danach.",
+    },
+    "unanswered_reminder_title": {
+        "uz": "⚠️ <b>Eslatma</b>",
+        "ru": "⚠️ <b>Напоминание</b>",
+        "en": "⚠️ <b>Reminder</b>",
+        "de": "⚠️ <b>Erinnerung</b>",
+    },
+    "unanswered_reminder_body": {
+        "uz": "Siz bu chatga 1 kundan ortiq vaqt davomida "
+        "javob bermadingiz.",
+        "ru": "Вы не отвечали в этом чате более 1 дня.",
+        "en": "You haven't replied in this chat for more than "
+        "a day.",
+        "de": "Sie haben in diesem Chat seit mehr als einem "
+        "Tag nicht geantwortet.",
+    },
+    "unanswered_reminder_peer_line": {
+        "uz": "👤 {name}",
+        "ru": "👤 {name}",
+        "en": "👤 {name}",
+        "de": "👤 {name}",
+    },
+    "duration_days_hours": {
+        "uz": "{days} kun {hours} soat",
+        "ru": "{days} дн {hours} ч",
+        "en": "{days}d {hours}h",
+        "de": "{days} Tg {hours} Std",
+    },
+    "duration_hours_only": {
+        "uz": "{hours} soat",
+        "ru": "{hours} ч",
+        "en": "{hours}h",
+        "de": "{hours} Std",
+    },
+    "stats_unanswered_label": {
+        "uz": "💬 Javob berilmagan",
+        "ru": "💬 Без ответа",
+        "en": "💬 Unanswered",
+        "de": "💬 Unbeantwortet",
+    },
+    "stats_answered_label": {
+        "uz": "✅ Javob berganlar",
+        "ru": "✅ С ответом",
+        "en": "✅ Answered",
+        "de": "✅ Beantwortet",
+    },
+    "stats_overdue_label": {
+        "uz": "⏳ 24 soatdan oshgan",
+        "ru": "⏳ Более 24 часов",
+        "en": "⏳ Over 24 hours",
+        "de": "⏳ Über 24 Stunden",
     },
 }
 

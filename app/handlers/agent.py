@@ -13,7 +13,9 @@ from app.services.access_guard import (
     guard_callback_access,
     guard_message_access,
 )
+from app.services.unanswered_chat_service import get_unanswered_stats
 from app.services.user_service import (
+    get_connected_telegram_account,
     get_user_by_telegram_id,
     get_user_language,
 )
@@ -198,6 +200,11 @@ async def nano_agent_stats(
 
         stats = await get_user_statistics(session, user.id)
 
+        account = await get_connected_telegram_account(
+            session,
+            user.id,
+        )
+
     await callback.answer()
 
     text = (
@@ -221,6 +228,21 @@ async def nano_agent_stats(
         f"🤖 {stats.auto_replies_total} · "
         f"1️⃣ {stats.first_messages_total}"
     )
+
+    # MUHIM: mavjud statistikani buzmasdan, "Javob berilmagan
+    # chatlar" bo'yicha qo'shimcha ma'lumot (12-bo'lim) faqat
+    # ulangan akkaunt bo'lsa qo'shiladi.
+    if account is not None:
+        unanswered_stats = await get_unanswered_stats(account.id)
+
+        text += (
+            f"\n\n{t('stats_unanswered_label', lang)}: "
+            f"<b>{unanswered_stats.unanswered}</b>\n"
+            f"{t('stats_answered_label', lang)}: "
+            f"<b>{unanswered_stats.answered}</b>\n"
+            f"{t('stats_overdue_label', lang)}: "
+            f"<b>{unanswered_stats.overdue_24h}</b>"
+        )
 
     await _safe_edit(
         callback,

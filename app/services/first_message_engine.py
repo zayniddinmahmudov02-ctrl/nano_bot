@@ -17,8 +17,13 @@ from app.database.models import (
 )
 from app.services.media_service import send_stored_post
 from app.services.telegram_event_filters import (
+    get_peer_display_info,
     is_private_incoming_event,
     validate_private_user_event,
+)
+from app.services.unanswered_chat_service import (
+    mark_answered,
+    record_outgoing_message,
 )
 from app.services.user_stats_service import (
     FIRST_MESSAGE_EVENT,
@@ -340,6 +345,20 @@ class FirstMessageEngine:
             peer_id = int(event.chat_id)
             now = datetime.now(timezone.utc)
 
+            # MUHIM (Javob berilmagan chatlar — spec 2/6-bo'lim):
+            # bu tekshiruv First Message konfiguratsiya
+            # qilingan-qilinmaganidan qat'iy nazar, HAR bir
+            # kiruvchi shaxsiy xabar uchun bajariladi (quyidagi
+            # "first_message is None" erta-return'idan OLDIN) —
+            # chunki javobsiz chat Auto Reply orqali ham ochilgan
+            # bo'lishi mumkin, va foydalanuvchi javob yozganda u
+            # har doim resolve qilinishi kerak.
+            await mark_answered(
+                telegram_account_id=telegram_account_id,
+                peer_id=peer_id,
+                replied_at=now,
+            )
+
             should_send = False
             first_message: Optional[dict] = None
 
@@ -398,6 +417,18 @@ class FirstMessageEngine:
 
             if sent:
                 await self._update_statistics(db_user_id)
+
+                peer_name, peer_username = (
+                    await get_peer_display_info(event)
+                )
+
+                await record_outgoing_message(
+                    telegram_account_id=telegram_account_id,
+                    peer_id=peer_id,
+                    peer_name=peer_name,
+                    peer_username=peer_username,
+                    sent_at=now,
+                )
 
         except Exception:
             logger.exception(

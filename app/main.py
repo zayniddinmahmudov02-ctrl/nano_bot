@@ -23,6 +23,7 @@ from app.handlers import (
     agent_router,
     auto_replies_router,
     first_message_router,
+    unanswered_chats_router,
     assistant_router,
     statistics_router,
     language_router,
@@ -38,6 +39,9 @@ from app.services.first_message_engine import first_message_engine
 from app.services.scheduler_service import (
     start_scheduler,
     stop_scheduler,
+)
+from app.services.scheduler_service import (
+    set_bot_instance as set_scheduler_bot_instance,
 )
 from app.services.security_service import set_bot_instance
 from app.telegram.user_client import telegram_client_manager
@@ -247,6 +251,9 @@ def register_routers(dp: Dispatcher) -> None:
 
     # Birinchi xabar (nano:agent:first)
     dp.include_router(first_message_router)
+
+    # Javob berilmagan chatlar (nano:agent:unanswered)
+    dp.include_router(unanswered_chats_router)
 
     # Nano-Yordamchi (YouTube-Save / Insta-Save)
     dp.include_router(assistant_router)
@@ -534,6 +541,11 @@ async def main() -> None:
     # Security alertlarni admin(lar)ga yuborish uchun Bot
     # obyektiga referens beriladi.
     set_bot_instance(bot)
+
+    # Javob berilmagan chat eslatmalarini (24h reminder)
+    # yuborish uchun Scheduler'ga ham Bot obyektiga referens
+    # beriladi.
+    set_scheduler_bot_instance(bot)
 
     register_routers(dp)
 

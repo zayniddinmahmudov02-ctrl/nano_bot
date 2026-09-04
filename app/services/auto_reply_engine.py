@@ -18,8 +18,12 @@ from app.services.user_stats_service import (
     record_statistics_event,
 )
 from app.services.telegram_event_filters import (
+    get_peer_display_info,
     is_private_incoming_event,
     validate_private_user_event,
+)
+from app.services.unanswered_chat_service import (
+    record_outgoing_message,
 )
 from app.telegram.user_client import telegram_client_manager
 
@@ -458,6 +462,19 @@ class AutoReplyEngine:
                 if sent:
                     await self._update_statistics(
                         db_user_id
+                    )
+
+                    peer_name, peer_username = (
+                        await get_peer_display_info(event)
+                    )
+
+                    await record_outgoing_message(
+                        telegram_account_id=(
+                            telegram_account_id
+                        ),
+                        peer_id=int(event.chat_id),
+                        peer_name=peer_name,
+                        peer_username=peer_username,
                     )
 
                 # Bir xabarga birinchi mos kelgan
