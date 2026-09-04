@@ -23,6 +23,7 @@ from app.handlers import (
     agent_router,
     auto_replies_router,
     first_message_router,
+    storage_recreate_router,
     unanswered_chats_router,
     assistant_router,
     statistics_router,
@@ -251,6 +252,10 @@ def register_routers(dp: Dispatcher) -> None:
 
     # Birinchi xabar (nano:agent:first)
     dp.include_router(first_message_router)
+
+    # Storage Channel qayta yaratish tasdig'i (storage:recreate:*)
+    # — Auto Reply va First Message flow'lari uchun umumiy.
+    dp.include_router(storage_recreate_router)
 
     # Javob berilmagan chatlar (nano:agent:unanswered)
     dp.include_router(unanswered_chats_router)

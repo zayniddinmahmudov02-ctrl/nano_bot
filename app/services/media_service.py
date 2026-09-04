@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from aiogram.types import Message as BotMessage
@@ -187,6 +188,8 @@ async def send_post_to_storage(
     storage_chat_id: int,
     source_message_id: int,
     fallback_text: Optional[str] = None,
+    user_id: Optional[int] = None,
+    account_id: Optional[int] = None,
 ) -> Optional[int]:
     """
     Foydalanuvchi botga yuborgan postni (Bot API `message_id`si
@@ -194,8 +197,16 @@ async def send_post_to_storage(
     foydalanuvchining Storage Channel'iga — Bot API'dan
     BUTUNLAY mustaqil ravishda — joylaydi.
 
-    Qaytaradi: Storage Channel'dagi yangi xabar ID'si, yoki
-    xatolik/topilmasa None.
+    Qaytaradi: Storage Channel'dagi YANGI xabar ID'si (HECH
+    QACHON `source_message_id` emas — bular ikki butunlay boshqa
+    chatdagi ikki mustaqil xabar), yoki xatolik/topilmasa None.
+
+    MUHIM (post-save validation): Telegram'dan qaytgan "yuborildi"
+    javobiga ko'r-ko'rona ishonilmaydi — xabar Storage Channel'ga
+    yuborilgandan DARHOL KEYIN `get_messages()` orqali qayta
+    o'qib, HAQIQATAN ham u yerda mavjudligi tasdiqlanadi. Agar
+    tasdiqlanmasa — fake/soxta ID hech qachon qaytarilmaydi va
+    hech qachon DB'ga yozilmaydi.
 
     MUHIM: `MessageMediaWebPage` (foydalanuvchi shunchaki link
     yuborganda, Telegram avtomatik qo'shadigan URL preview)
@@ -230,27 +241,65 @@ async def send_post_to_storage(
         )
 
         if has_real_media:
+            media_type = type(source_message.media).__name__
+
             sent = await telethon_client.send_file(
                 storage_entity,
                 source_message.media,
                 caption=source_message.message or None,
             )
+        else:
+            media_type = "text"
 
-            return int(sent.id)
+            text = source_message.message or fallback_text
 
-        text = source_message.message or fallback_text
+            if not text:
+                logger.warning(
+                    "Source xabarda na media, na matn topildi: "
+                    "message_id=%s",
+                    source_message_id,
+                )
+                return None
 
-        if not text:
-            logger.warning(
-                "Source xabarda na media, na matn topildi: "
-                "message_id=%s",
+            sent = await telethon_client.send_message(
+                storage_entity,
+                text,
+            )
+
+        # MUHIM (spec 6-bo'lim — post-save validation): DARHOL
+        # qayta o'qib, xabar haqiqatan Storage Channel'da
+        # mavjudligini tasdiqlaymiz. Tasdiqlanmasa — DB'ga
+        # HECH QACHON fake ID yozilmaydi.
+        verified = await telethon_client.get_messages(
+            storage_entity,
+            ids=sent.id,
+        )
+
+        if verified is None:
+            logger.error(
+                "storage_save: post-save validation "
+                "muvaffaqiyatsiz — Storage'da tasdiqlanmadi: "
+                "user_id=%s, account_id=%s, "
+                "source_message_id=%s, storage_chat_id=%s, "
+                "storage_message_id=%s",
+                user_id,
+                account_id,
                 source_message_id,
+                storage_chat_id,
+                sent.id,
             )
             return None
 
-        sent = await telethon_client.send_message(
-            storage_entity,
-            text,
+        logger.info(
+            "storage_save: user_id=%s, account_id=%s, "
+            "source_message_id=%s, storage_chat_id=%s, "
+            "storage_message_id=%s, media_type=%s",
+            user_id,
+            account_id,
+            source_message_id,
+            storage_chat_id,
+            sent.id,
+            media_type,
         )
 
         return int(sent.id)
@@ -278,39 +327,77 @@ async def send_post_to_storage(
 # SEND STORED POST AS A NEW MESSAGE (NOT FORWARD)
 # ============================================================
 
+@dataclass
+class SendStoredPostResult:
+    success: bool
+
+    # MUHIM: aynan "topilmadi" (Storage Channel yoki undagi
+    # xabar o'chirilgan/kirish yo'q) holatini boshqa (vaqtinchalik/
+    # texnik) xatolardan ajratib beradi — chaqiruvchi shu orqali
+    # Auto Reply/First Message record'ini "NEEDS_RESAVE" deb
+    # belgilashi kerakmi yoki yo'qmi hal qiladi.
+    not_found: bool = False
+
+
 async def send_stored_post(
     *,
     telethon_client: TelegramClient,
     storage_chat_id: int,
     storage_message_id: int,
     target_chat_id: int,
-) -> bool:
+    user_id: Optional[int] = None,
+    account_id: Optional[int] = None,
+) -> SendStoredPostResult:
     """
     Storage Channel'dagi postni forward qilmasdan, yangi xabar
     sifatida target chatga yuboradi.
 
-    Agar storage message o'chirilgan bo'lsa yoki topilmasa,
-    xatolik ko'tarmaydi — False qaytaradi va admin logga yozadi.
+    Agar storage message/kanal o'chirilgan bo'lsa yoki topilmasa,
+    xatolik ko'tarmaydi — `not_found=True` bilan qaytaradi va
+    xavfsiz log yozadi.
     """
 
     try:
         storage_entity = await telethon_client.get_entity(
             PeerChannel(storage_chat_id)
         )
+    except Exception:
+        # MUHIM: aynan shu bosqichda (entity/kanalning o'zini
+        # topish) muvaffaqiyatsizlik — kanal o'chirilgan yoki
+        # kirish yo'qolganini bildiradi. Bu aniq "not_found"
+        # holati (NEEDS_RESAVE uchun signal) — vaqtinchalik
+        # tarmoq xatosidan farqli.
+        logger.warning(
+            "Storage kanaliga kirib bo'lmadi (o'chirilgan "
+            "bo'lishi mumkin): chat_id=%s",
+            storage_chat_id,
+        )
+        return SendStoredPostResult(success=False, not_found=True)
 
+    try:
         stored_message = await telethon_client.get_messages(
             storage_entity,
             ids=storage_message_id,
         )
 
-        if stored_message is None:
-            logger.warning(
-                "Storage post topilmadi (o'chirilgan bo'lishi mumkin): "
-                "chat_id=%s message_id=%s",
-                storage_chat_id,
-                storage_message_id,
+        found = stored_message is not None
+
+        logger.info(
+            "storage_get: user_id=%s, account_id=%s, "
+            "storage_chat_id=%s, storage_message_id=%s, "
+            "found=%s",
+            user_id,
+            account_id,
+            storage_chat_id,
+            storage_message_id,
+            found,
+        )
+
+        if not found:
+            return SendStoredPostResult(
+                success=False,
+                not_found=True,
             )
-            return False
 
         has_real_media = (
             stored_message.media is not None
@@ -325,23 +412,29 @@ async def send_stored_post(
                 stored_message.media,
                 caption=stored_message.message or None,
             )
-            return True
+            return SendStoredPostResult(success=True)
 
         if stored_message.message:
             await telethon_client.send_message(
                 target_chat_id,
                 stored_message.message,
             )
-            return True
+            return SendStoredPostResult(success=True)
 
         logger.warning(
             "Storage post bo'sh: chat_id=%s message_id=%s",
             storage_chat_id,
             storage_message_id,
         )
-        return False
+        return SendStoredPostResult(success=False, not_found=True)
 
     except Exception:
+        # MUHIM: bu bosqichda entity (kanal) allaqachon
+        # muvaffaqiyatli topilgan edi — shu sabab bu yerdagi
+        # xatolik ko'pincha VAQTINCHALIK/texnik muammo (masalan
+        # tarmoq), doimiy "kanal o'chirilgan" holati EMAS. Shu
+        # sabab `not_found=False` — Auto Reply/First Message
+        # bekorga NEEDS_RESAVE deb belgilanmaydi.
         logger.exception(
             "Storage postni yuborishda xatolik: "
             "chat_id=%s message_id=%s target=%s",
@@ -349,12 +442,13 @@ async def send_stored_post(
             storage_message_id,
             target_chat_id,
         )
-        return False
+        return SendStoredPostResult(success=False, not_found=False)
 
 
 __all__ = [
     "SUPPORTED_MESSAGE_TYPES",
     "StoragePostTooLarge",
+    "SendStoredPostResult",
     "detect_post_content",
     "is_part_of_media_group",
     "send_post_to_storage",

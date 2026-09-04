@@ -135,6 +135,45 @@ class FirstMessageEngine:
         return contact
 
     # =====================================================
+    # STORAGE SOURCE STATUS
+    # =====================================================
+
+    async def _mark_needs_resave(
+        self,
+        first_message_id: Optional[int],
+    ) -> None:
+        """
+        Storage Channel/post endi topilmayotganda chaqiriladi
+        (spec 12-bo'lim, AutoReplyEngine bilan bir xil qoida).
+        Record o'CHIRILMAYDI — faqat `source_status =
+        NEEDS_RESAVE` deb belgilanadi.
+        """
+
+        if first_message_id is None:
+            return
+
+        try:
+            async with AsyncSessionLocal() as session:
+                first_message = await session.get(
+                    FirstMessage,
+                    first_message_id,
+                )
+
+                if first_message is None:
+                    return
+
+                if first_message.source_status != "NEEDS_RESAVE":
+                    first_message.source_status = "NEEDS_RESAVE"
+                    await session.commit()
+
+        except Exception:
+            logger.exception(
+                "First Message source_status'ni NEEDS_RESAVE "
+                "deb belgilashda xatolik: first_message_id=%s",
+                first_message_id,
+            )
+
+    # =====================================================
     # STATISTICS
     # =====================================================
 
@@ -188,18 +227,45 @@ class FirstMessageEngine:
         client,
         target_chat_id: int,
         first_message: dict,
+        telegram_account_id: Optional[int] = None,
+        db_user_id: Optional[int] = None,
     ) -> bool:
         try:
             storage_chat_id = first_message["storage_chat_id"]
             storage_message_id = first_message["storage_message_id"]
 
             if storage_chat_id and storage_message_id:
-                return await send_stored_post(
+                result = await send_stored_post(
                     telethon_client=client,
                     storage_chat_id=storage_chat_id,
                     storage_message_id=storage_message_id,
                     target_chat_id=target_chat_id,
+                    user_id=db_user_id,
+                    account_id=telegram_account_id,
                 )
+
+                logger.info(
+                    "first_message_send: first_message_id=%s, "
+                    "account_id=%s, peer_id=%s, "
+                    "storage_chat_id=%s, storage_message_id=%s, "
+                    "result=%s",
+                    first_message.get("id"),
+                    telegram_account_id,
+                    target_chat_id,
+                    storage_chat_id,
+                    storage_message_id,
+                    "success" if result.success else "failed",
+                )
+
+                if not result.success and result.not_found:
+                    # MUHIM (spec 12-bo'lim, Auto Reply bilan bir
+                    # xil qoida): record o'chirilmaydi, faqat
+                    # NEEDS_RESAVE deb belgilanadi.
+                    await self._mark_needs_resave(
+                        first_message.get("id")
+                    )
+
+                return result.success
 
             # MUHIM: bu yerga faqat Storage Channel'ga hali
             # ko'chirilmagan ESKI (legacy) yozuvlar tushadi
@@ -413,6 +479,8 @@ class FirstMessageEngine:
                 client=client,
                 target_chat_id=event.chat_id,
                 first_message=first_message,
+                telegram_account_id=telegram_account_id,
+                db_user_id=db_user_id,
             )
 
             if sent:

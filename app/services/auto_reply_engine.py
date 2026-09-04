@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Set
+from typing import Dict, Optional, Set
 
 from sqlalchemy import select
 from telethon import events
@@ -166,6 +166,7 @@ class AutoReplyEngine:
         event,
         auto_reply: dict,
         telegram_account_id: int,
+        db_user_id: Optional[int] = None,
     ) -> bool:
         auto_reply_id = auto_reply.get("id")
         peer_id = int(event.chat_id)
@@ -192,33 +193,37 @@ class AutoReplyEngine:
                     storage_message_id,
                 )
 
-                sent = await send_stored_post(
+                result = await send_stored_post(
                     telethon_client=client,
                     storage_chat_id=storage_chat_id,
                     storage_message_id=storage_message_id,
                     target_chat_id=event.chat_id,
+                    user_id=db_user_id,
+                    account_id=telegram_account_id,
                 )
 
-                if sent:
-                    logger.info(
-                        "Auto Reply sent successfully: "
-                        "auto_reply_id=%s, account_id=%s, "
-                        "peer_id=%s",
-                        auto_reply_id,
-                        telegram_account_id,
-                        peer_id,
-                    )
-                else:
-                    logger.warning(
-                        "Auto Reply send failed: "
-                        "auto_reply_id=%s, account_id=%s, "
-                        "peer_id=%s",
-                        auto_reply_id,
-                        telegram_account_id,
-                        peer_id,
-                    )
+                logger.info(
+                    "auto_reply_send: auto_reply_id=%s, "
+                    "account_id=%s, peer_id=%s, "
+                    "storage_chat_id=%s, storage_message_id=%s, "
+                    "result=%s",
+                    auto_reply_id,
+                    telegram_account_id,
+                    peer_id,
+                    storage_chat_id,
+                    storage_message_id,
+                    "success" if result.success else "failed",
+                )
 
-                return sent
+                if not result.success and result.not_found:
+                    # MUHIM (spec 12-bo'lim): Storage Channel/post
+                    # endi topilmayapti — bu Auto Reply keyingi
+                    # tahrirlash orqali qayta saqlanguncha
+                    # NEEDS_RESAVE deb belgilanadi. Record
+                    # o'CHIRILMAYDI.
+                    await self._mark_needs_resave(auto_reply_id)
+
+                return result.success
 
             if message_type == "text":
                 if not message_text:
@@ -299,6 +304,46 @@ class AutoReplyEngine:
                 peer_id,
             )
             return False
+
+    # =====================================================
+    # STORAGE SOURCE STATUS
+    # =====================================================
+
+    async def _mark_needs_resave(
+        self,
+        auto_reply_id: Optional[int],
+    ) -> None:
+        """
+        Storage Channel/post endi topilmayotganda chaqiriladi
+        (spec 12-bo'lim). Record o'CHIRILMAYDI — faqat
+        `source_status = NEEDS_RESAVE` deb belgilanadi, shunda
+        foydalanuvchi buni tahrirlash orqali qayta saqlashi
+        mumkin.
+        """
+
+        if auto_reply_id is None:
+            return
+
+        try:
+            async with AsyncSessionLocal() as session:
+                auto_reply = await session.get(
+                    AutoReply,
+                    auto_reply_id,
+                )
+
+                if auto_reply is None:
+                    return
+
+                if auto_reply.source_status != "NEEDS_RESAVE":
+                    auto_reply.source_status = "NEEDS_RESAVE"
+                    await session.commit()
+
+        except Exception:
+            logger.exception(
+                "Auto Reply source_status'ni NEEDS_RESAVE deb "
+                "belgilashda xatolik: auto_reply_id=%s",
+                auto_reply_id,
+            )
 
     # =====================================================
     # STATISTICS
@@ -509,6 +554,7 @@ class AutoReplyEngine:
                     event=event,
                     auto_reply=auto_reply,
                     telegram_account_id=telegram_account_id,
+                    db_user_id=db_user_id,
                 )
 
                 if sent:

@@ -23,6 +23,10 @@ from app.keyboards.auto_reply import (
     auto_reply_list_inline_keyboard,
 )
 from app.keyboards.main import main_menu_keyboard
+from app.keyboards.storage import (
+    STORAGE_DELETED_TEXT,
+    storage_recreate_confirm_keyboard,
+)
 from app.services.media_service import (
     StoragePostTooLarge,
     detect_post_content,
@@ -32,7 +36,10 @@ from app.services.activity_service import (
     get_or_create_subscription,
     is_activity_active,
 )
-from app.services.storage_channel_service import ensure_storage_channel
+from app.services.storage_channel_service import (
+    NEEDS_CONFIRMATION,
+    get_or_create_user_storage_channel,
+)
 from app.services.user_service import (
     get_connected_telegram_account,
     get_user_by_telegram_id,
@@ -214,6 +221,19 @@ async def _render_detail_text(
 
     preview = _build_preview_text(auto_reply)
 
+    # MUHIM (spec 12-bo'lim): agar eski Storage Channel o'chirilgan
+    # bo'lsa va postni qayta saqlash kerak bo'lsa, foydalanuvchiga
+    # aniq va tushunarli holat ko'rsatiladi.
+    needs_resave_line = ""
+
+    if getattr(auto_reply, "source_status", "ACTIVE") == "NEEDS_RESAVE":
+        needs_resave_line = (
+            "\n\n⚠️ <b>Diqqat:</b> bu javobning manba posti endi "
+            "topilmayapti (Xotira kanali o‘chirilgan bo‘lishi "
+            "mumkin). Iltimos, «✏️ Javob postini tahrirlash» "
+            "orqali postni qayta yuboring."
+        )
+
     return (
         f"📩 <b>Avto xabar #{auto_reply.id}</b>\n\n"
         f"{status}\n\n"
@@ -221,6 +241,7 @@ async def _render_detail_text(
         f"{keyword_text}\n\n"
         f"📨 <b>Javob:</b>\n"
         f"{preview}"
+        f"{needs_resave_line}"
     )
 
 
@@ -254,6 +275,70 @@ async def _render_list(
     )
 
     return text, indexed_ids
+
+
+# ============================================================
+# STORAGE CHANNEL — markaziy servis orqali (spec 13-bo'lim)
+# ============================================================
+#
+# MUHIM: bu funksiya `app.handlers.first_message`da ham qayta
+# ishlatiladi — Storage Channel bilan ishlashning YAGONA,
+# markaziy nuqtasi shu (handlerlar o'zlaricha kanal
+# yaratmaydi/tekshirmaydi).
+
+async def resolve_storage_channel_or_prompt(
+    message: Message,
+    state: FSMContext,
+    *,
+    telegram_id: int,
+    db_user_id: int,
+    telegram_account_id: int,
+    return_state,
+):
+    """
+    Markaziy `get_or_create_user_storage_channel()`dan foydalanadi.
+
+    - Kanal tayyor (READY/CREATED) bo'lsa — uni qaytaradi.
+    - Foydalanuvchi tasdig'i kerak bo'lsa (DB'dagi kanal
+      Telethon orqali endi topilmayapti — o'chirilgan) —
+      tasdiqlash xabarini (Ha/Yo'q) ko'rsatadi, keyinroq qaysi
+      FSM holatiga qaytish kerakligini `state`ga yozadi va
+      `None` qaytaradi. Chaqiruvchi shu holatda DARHOL to'xtashi
+      kerak — foydalanuvchi javobini kutish endi
+      `storage:recreate:confirm`/`:cancel` callback'lari
+      zimmasida.
+    - Texnik xatolik bo'lsa — tushunarli xabar ko'rsatiladi,
+      `None` qaytaradi.
+    """
+
+    result = await get_or_create_user_storage_channel(
+        telegram_id=telegram_id,
+        db_user_id=db_user_id,
+        telegram_account_id=telegram_account_id,
+    )
+
+    if result.status == NEEDS_CONFIRMATION:
+        await state.update_data(
+            storage_return_state=return_state.state,
+        )
+
+        await message.answer(
+            STORAGE_DELETED_TEXT,
+            reply_markup=storage_recreate_confirm_keyboard(),
+        )
+
+        return None
+
+    if result.channel is None:
+        await message.answer(
+            "❌ Storage kanalni tayyorlashda xatolik yuz berdi.\n\n"
+            "Birozdan keyin qayta urinib ko‘ring yoki Telegram "
+            "akkauntingizni qayta ulang."
+        )
+
+        return None
+
+    return result.channel
 
 
 async def _safe_edit(
@@ -576,18 +661,16 @@ async def receive_post(
         db_user_id = user.id
         telegram_account_id = account.id
 
-    storage_channel = await ensure_storage_channel(
+    storage_channel = await resolve_storage_channel_or_prompt(
+        message,
+        state,
         telegram_id=telegram_id,
         db_user_id=db_user_id,
         telegram_account_id=telegram_account_id,
+        return_state=AutoReplyStates.waiting_post,
     )
 
     if storage_channel is None:
-        await message.answer(
-            "❌ Storage kanalni tayyorlashda xatolik yuz berdi.\n\n"
-            "Birozdan keyin qayta urinib ko‘ring yoki Telegram "
-            "akkauntingizni qayta ulang."
-        )
         return
 
     telethon_client = telegram_client_manager.get_client(
@@ -607,6 +690,8 @@ async def receive_post(
             storage_chat_id=storage_channel.chat_id,
             source_message_id=message.message_id,
             fallback_text=text,
+            user_id=db_user_id,
+            account_id=telegram_account_id,
         )
     except StoragePostTooLarge:
         await state.clear()
@@ -673,6 +758,7 @@ async def receive_post(
             message_text=text,
             storage_chat_id=storage_channel.chat_id,
             storage_message_id=storage_message_id,
+            source_status="ACTIVE",
             is_active=True,
         )
 
@@ -1598,18 +1684,16 @@ async def ar_receive_edit_post(
         db_user_id = user.id
         telegram_account_id = account.id
 
-    storage_channel = await ensure_storage_channel(
+    storage_channel = await resolve_storage_channel_or_prompt(
+        message,
+        state,
         telegram_id=telegram_id,
         db_user_id=db_user_id,
         telegram_account_id=telegram_account_id,
+        return_state=AutoReplyStates.waiting_edit_reply_post,
     )
 
     if storage_channel is None:
-        await message.answer(
-            "❌ Storage kanalni tayyorlashda xatolik yuz berdi.\n\n"
-            "Birozdan keyin qayta urinib ko‘ring yoki Telegram "
-            "akkauntingizni qayta ulang."
-        )
         return
 
     telethon_client = telegram_client_manager.get_client(
@@ -1629,6 +1713,8 @@ async def ar_receive_edit_post(
             storage_chat_id=storage_channel.chat_id,
             source_message_id=message.message_id,
             fallback_text=text,
+            user_id=db_user_id,
+            account_id=telegram_account_id,
         )
     except StoragePostTooLarge:
         await state.clear()
@@ -1664,6 +1750,11 @@ async def ar_receive_edit_post(
         auto_reply.message_text = text
         auto_reply.storage_chat_id = storage_channel.chat_id
         auto_reply.storage_message_id = storage_message_id
+
+        # Post muvaffaqiyatli qayta saqlandi — agar avval
+        # NEEDS_RESAVE bo'lgan bo'lsa ham, endi yana ACTIVE
+        # (spec 12-bo'lim).
+        auto_reply.source_status = "ACTIVE"
 
         # Eski (legacy) Bot API file_id/link endi ishlatilmaydi.
         auto_reply.file_id = None

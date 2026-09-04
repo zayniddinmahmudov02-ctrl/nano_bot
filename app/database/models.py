@@ -318,6 +318,21 @@ class AutoReply(Base):
         nullable=True,
     )
 
+    # ACTIVE | NEEDS_RESAVE
+    #
+    # Storage Channel o'chirilgan/topilmasa va shu Auto Reply'ning
+    # source posti yangi kanalga hali qayta saqlanmagan bo'lsa
+    # NEEDS_RESAVE bo'ladi — record o'chirilmaydi, faqat userga
+    # "postni qayta yuboring" degan holat ko'rsatiladi. Post
+    # muvaffaqiyatli qayta saqlansa (tahrirlash orqali) yana
+    # ACTIVE'ga qaytadi.
+    source_status: Mapped[str] = mapped_column(
+        String(20),
+        default="ACTIVE",
+        server_default="ACTIVE",
+        nullable=False,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -423,6 +438,15 @@ class FirstMessage(Base):
     storage_message_id: Mapped[Optional[int]] = mapped_column(
         Integer,
         nullable=True,
+    )
+
+    # ACTIVE | NEEDS_RESAVE — qarang: AutoReply.source_status
+    # izohi (bir xil qoida).
+    source_status: Mapped[str] = mapped_column(
+        String(20),
+        default="ACTIVE",
+        server_default="ACTIVE",
+        nullable=False,
     )
 
     # Bir xil kontaktga First Message qayta yuborilishi

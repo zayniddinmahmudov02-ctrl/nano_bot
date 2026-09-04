@@ -16,6 +16,7 @@ from app.keyboards.first_message import (
     first_message_input_cancel_keyboard,
     first_message_interval_keyboard,
 )
+from app.handlers.auto_replies import resolve_storage_channel_or_prompt
 from app.keyboards.main import main_menu_keyboard
 from app.services.access_guard import guard_callback_access
 from app.services.media_service import (
@@ -23,7 +24,6 @@ from app.services.media_service import (
     detect_post_content,
     send_post_to_storage,
 )
-from app.services.storage_channel_service import ensure_storage_channel
 from app.services.user_service import (
     get_connected_telegram_account,
     get_user_by_telegram_id,
@@ -78,6 +78,20 @@ def _render_card_text(first_message: FirstMessage) -> str:
     if len(preview) > 300:
         preview = preview[:300] + "…"
 
+    # MUHIM (spec 12-bo'lim): Auto Reply bilan bir xil qoida.
+    needs_resave_line = ""
+
+    if (
+        getattr(first_message, "source_status", "ACTIVE")
+        == "NEEDS_RESAVE"
+    ):
+        needs_resave_line = (
+            "\n\n⚠️ <b>Diqqat:</b> bu xabarning manba posti endi "
+            "topilmayapti (Xotira kanali o‘chirilgan bo‘lishi "
+            "mumkin). Iltimos, «✏️ Tahrirlash» orqali postni "
+            "qayta yuboring."
+        )
+
     return (
         "1️⃣ <b>Birinchi xabar</b>\n\n"
         f"{status}\n"
@@ -86,6 +100,7 @@ def _render_card_text(first_message: FirstMessage) -> str:
         f"<b>{_interval_label(first_message.repeat_interval_seconds)}</b>"
         "\n\n"
         f"📨 <b>Xabar:</b>\n{preview}"
+        f"{needs_resave_line}"
     )
 
 
@@ -341,17 +356,16 @@ async def receive_first_message(
         db_user_id = user.id
         telegram_account_id = account.id
 
-    storage_channel = await ensure_storage_channel(
+    storage_channel = await resolve_storage_channel_or_prompt(
+        message,
+        state,
         telegram_id=telegram_id,
         db_user_id=db_user_id,
         telegram_account_id=telegram_account_id,
+        return_state=FirstMessageStates.waiting_message,
     )
 
     if storage_channel is None:
-        await message.answer(
-            "❌ Storage kanalni tayyorlashda xatolik yuz berdi.\n\n"
-            "Birozdan keyin qayta urinib ko‘ring."
-        )
         return
 
     telethon_client = telegram_client_manager.get_client(
@@ -370,6 +384,8 @@ async def receive_first_message(
             storage_chat_id=storage_channel.chat_id,
             source_message_id=message.message_id,
             fallback_text=text,
+            user_id=db_user_id,
+            account_id=telegram_account_id,
         )
     except StoragePostTooLarge:
         await state.clear()
@@ -421,6 +437,7 @@ async def receive_first_message(
             link=None,
             storage_chat_id=storage_channel.chat_id,
             storage_message_id=storage_message_id,
+            source_status="ACTIVE",
             repeat_interval_seconds=INTERVAL_HOUR,
             active=True,
         )
@@ -587,16 +604,16 @@ async def receive_edit_first_message(
         db_user_id = user.id
         telegram_account_id = account.id
 
-    storage_channel = await ensure_storage_channel(
+    storage_channel = await resolve_storage_channel_or_prompt(
+        message,
+        state,
         telegram_id=telegram_id,
         db_user_id=db_user_id,
         telegram_account_id=telegram_account_id,
+        return_state=FirstMessageStates.waiting_edit_message,
     )
 
     if storage_channel is None:
-        await message.answer(
-            "❌ Storage kanalni tayyorlashda xatolik yuz berdi."
-        )
         return
 
     telethon_client = telegram_client_manager.get_client(
@@ -615,6 +632,8 @@ async def receive_edit_first_message(
             storage_chat_id=storage_channel.chat_id,
             source_message_id=message.message_id,
             fallback_text=text,
+            user_id=db_user_id,
+            account_id=telegram_account_id,
         )
     except StoragePostTooLarge:
         await state.clear()
@@ -665,6 +684,10 @@ async def receive_edit_first_message(
         first_message.link = None
         first_message.storage_chat_id = storage_channel.chat_id
         first_message.storage_message_id = storage_message_id
+
+        # Post muvaffaqiyatli qayta saqlandi — agar avval
+        # NEEDS_RESAVE bo'lgan bo'lsa ham, endi yana ACTIVE.
+        first_message.source_status = "ACTIVE"
 
         await session.commit()
 

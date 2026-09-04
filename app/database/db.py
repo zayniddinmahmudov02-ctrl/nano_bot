@@ -102,6 +102,15 @@ async def run_manual_migrations() -> None:
         "ALTER TABLE first_messages "
         "ADD COLUMN IF NOT EXISTS repeat_interval_seconds "
         "INTEGER NOT NULL DEFAULT 3600",
+        # Storage Channel o'chirilgan holatni belgilash uchun
+        # (ACTIVE | NEEDS_RESAVE) — mavjud recordlar buzilmaydi,
+        # barchasi DEFAULT 'ACTIVE' bilan boshlanadi.
+        "ALTER TABLE auto_replies "
+        "ADD COLUMN IF NOT EXISTS source_status VARCHAR(20) "
+        "NOT NULL DEFAULT 'ACTIVE'",
+        "ALTER TABLE first_messages "
+        "ADD COLUMN IF NOT EXISTS source_status VARCHAR(20) "
+        "NOT NULL DEFAULT 'ACTIVE'",
         # Bot paroli / inactivity lock (21-bo'lim).
         # MUHIM: Telegram akkaunt paroli/2FA EMAS — faqat
         # Nano-Bot'ning o'ziga kirishni himoyalovchi qo'shimcha
