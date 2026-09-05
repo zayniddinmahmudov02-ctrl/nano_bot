@@ -78,6 +78,12 @@ _ORDERED_MARKERS = (
         ),
     ),
     (
+        # MUHIM (real production sinovi bilan topilgan): YouTube
+        # ba'zan xuddi shu bot-tekshiruvini video MA'LUMOTLARINI
+        # yuklab olish bosqichida (CDN darajasida) oddiy "HTTP
+        # Error 403: Forbidden" sifatida ham namoyon qiladi —
+        # sahifa darajasidagi aniq "sign in" xabarisiz. Shu sabab
+        # "403"/"forbidden" ham shu toifaga kiritildi.
         LOGIN_REQUIRED,
         (
             "sign in to confirm you're not a bot",
@@ -86,6 +92,8 @@ _ORDERED_MARKERS = (
             "login required",
             "use --cookies",
             "requires authentication",
+            "403",
+            "forbidden",
         ),
     ),
     (
