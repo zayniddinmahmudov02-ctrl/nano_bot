@@ -175,12 +175,27 @@ def _blocking_download(
         # audio+video birlashtirilgan formatning o'zi mavjud
         # bo'lmagan holatlarda (masalan zamonaviy YouTube) ishga
         # tushadi — bu holatda ffmpeg SHART.
+        # MUHIM (real production sinovi bilan tuzatilgan): oldingi
+        # variantda `bestvideo+bestaudio` yakuniy fallback HECH
+        # QANDAY hajm cheklovisiz edi — to'liq (audio+video)
+        # format umuman mavjud bo'lmagan videolar uchun (masalan
+        # uzun YouTube video) bu eng YUQORI sifatli (masalan 4K,
+        # 240MB+) alohida oqimlarni tanlardi, keyin `max_filesize`
+        # o'rtada yuklab olishni to'xtatardi — natijada chala
+        # (.part) fayllar qolib, xatolik hech qanday aniq log
+        # yozilmasdan "failed" bo'lib qolar edi. Endi
+        # `bestvideo+bestaudio` ham AVVAL hajm chegarasiga mos
+        # variant bilan sinaladi.
         "format": (
             f"best[filesize<{MAX_FILE_SIZE_BYTES}]"
             f"[acodec!=?none][vcodec!=?none]/"
             f"best[filesize_approx<{MAX_FILE_SIZE_BYTES}]"
             f"[acodec!=?none][vcodec!=?none]/"
             f"best[acodec!=?none][vcodec!=?none]/"
+            f"bestvideo[filesize<{MAX_FILE_SIZE_BYTES}]"
+            f"+bestaudio[filesize<{MAX_FILE_SIZE_BYTES}]/"
+            f"bestvideo[filesize_approx<{MAX_FILE_SIZE_BYTES}]"
+            f"+bestaudio[filesize_approx<{MAX_FILE_SIZE_BYTES}]/"
             f"bestvideo+bestaudio/best"
         ),
         "merge_output_format": "mp4",
@@ -244,12 +259,34 @@ def _cleanup_all(glob_pattern: str) -> None:
 
 
 def _resolve_entry_path(entry: Dict[str, Any]) -> Optional[str]:
-    requested_downloads = entry.get("requested_downloads")
+    """
+    MUHIM (real production sinovi bilan topilgan va tuzatilgan
+    xato): `requested_downloads` ikkita (video + audio) elementga
+    ega bo'lsa — bu ular ffmpeg orqali BIRLASHTIRILGANI (merge)
+    degani. Bunday holatda `requested_downloads[0]["filepath"]`
+    faqat ORALIQ (pre-merge) faylga ishora qiladi — muvaffaqiyatli
+    merge'dan KEYIN ffmpeg uni O'CHIRIB YUBORADI. Yakuniy,
+    HAQIQIY birlashtirilgan fayl nomi ENTRY darajasidagi
+    `_filename`da saqlanadi. Faqat BITTA (allaqachon to'liq,
+    merge SHART emas) oqim bo'lgandagina
+    `requested_downloads[0]["filepath"]` to'g'ridan-to'g'ri
+    ishonchli.
+    """
 
-    if requested_downloads:
+    requested_downloads = entry.get("requested_downloads") or []
+
+    if len(requested_downloads) == 1:
         return requested_downloads[0].get("filepath")
 
-    return entry.get("_filename")
+    return (
+        entry.get("_filename")
+        or entry.get("filename")
+        or (
+            requested_downloads[0].get("filepath")
+            if requested_downloads
+            else None
+        )
+    )
 
 
 async def run_download(url: str) -> DownloadResult:
@@ -358,6 +395,11 @@ async def run_download(url: str) -> DownloadResult:
 
     if info is None:
         _cleanup_all(glob_pattern)
+        logger.warning(
+            "Yuklab olish muvaffaqiyatsiz: yt-dlp hech qanday "
+            "xatolik ko'tarmadi, lekin ma'lumot (info) ham "
+            "qaytarmadi."
+        )
         return DownloadResult(ok=False, error_code="failed")
 
     # Carousel (playlist) bo'lsa bir nechta entry, aks holda —
@@ -404,8 +446,18 @@ async def run_download(url: str) -> DownloadResult:
 
     if not accepted:
         if had_oversized_candidate:
+            logger.warning(
+                "Yuklab olish rad etildi: barcha nomzod "
+                "fayl(lar) hajm chegarasidan katta edi."
+            )
             return DownloadResult(ok=False, error_code="too_large")
 
+        logger.warning(
+            "Yuklab olish muvaffaqiyatsiz: yt-dlp ma'lumot "
+            "qaytardi, lekin diskda haqiqiy, ishlatsa bo'ladigan "
+            "fayl topilmadi (masalan merge tugallanmagan yoki "
+            "fayl yo'li noto'g'ri aniqlangan bo'lishi mumkin)."
+        )
         return DownloadResult(ok=False, error_code="failed")
 
     first_path, first_media_type, first_title = accepted[0]
