@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from app.config import (
+    MAX_CONCURRENT_YOUTUBE_DOWNLOADS,
+    YOUTUBE_MAX_FILE_SIZE_MB,
+)
+
 logger = logging.getLogger(__name__)
 
 # ============================================================
@@ -21,10 +26,14 @@ logger = logging.getLogger(__name__)
 #   diskda vaqtincha saqlanadi va Telegramga yuborilgandan
 #   keyin O'CHIRILADI.
 # - Download URL/token hech qachon logga yozilmaydi.
+# - Limitlar `.env` orqali sozlanadi (app/config.py:
+#   YOUTUBE_MAX_FILE_SIZE_MB, MAX_CONCURRENT_YOUTUBE_DOWNLOADS) —
+#   Instagram Save VA YouTube Save uchun UMUMIY (bitta semaphore,
+#   serverning umumiy yukini nazorat qiladi).
 # ============================================================
 
-MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # ~50 MB (Bot API limiti)
-MAX_CONCURRENT_DOWNLOADS = 2
+MAX_FILE_SIZE_BYTES = YOUTUBE_MAX_FILE_SIZE_MB * 1024 * 1024
+MAX_CONCURRENT_DOWNLOADS = MAX_CONCURRENT_YOUTUBE_DOWNLOADS
 DOWNLOAD_TIMEOUT_SECONDS = 180
 SLOT_WAIT_TIMEOUT_SECONDS = 0.2
 

@@ -34,7 +34,7 @@ from app.services.youtube_downloader_service import (
 from app.services.youtube_downloader_service import (
     validate_url as validate_youtube_url,
 )
-from app.services.ytdlp_backend import is_ffmpeg_available
+from app.services.ytdlp_backend import is_yt_dlp_available
 from app.texts import t, t_all
 
 logger = logging.getLogger(__name__)
@@ -215,7 +215,13 @@ async def assistant_youtube_start(
     if not await guard_callback_access(callback, lang):
         return
 
-    if not is_ffmpeg_available():
+    # MUHIM (root cause tuzatildi): bu yerda ENDI ffmpeg emas,
+    # yt-dlp'ning O'ZI tekshiriladi — "serverda sozlanmagan"
+    # xabari FAQAT yt-dlp haqiqatan o'rnatilmagan bo'lsa
+    # ko'rsatiladi. ffmpeg yo'qligi (yoki topilmasligi) endi
+    # FAQAT haqiqatan merge talab qiladigan ANIQ video uchun,
+    # yuklab olish bosqichida ("unavailable" natija) aniqlanadi.
+    if not is_yt_dlp_available():
         await callback.answer()
 
         await _safe_edit(
@@ -551,7 +557,7 @@ async def assistant_auto_detect_link(
         return
 
     if platform == "youtube":
-        if not is_ffmpeg_available():
+        if not is_yt_dlp_available():
             await message.answer(t("download_unavailable", lang))
             return
 

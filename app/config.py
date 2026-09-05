@@ -203,3 +203,45 @@ LOG_LEVEL = get_env(
     "LOG_LEVEL",
     "INFO",
 ).upper()
+
+
+# =========================================================
+# NANO-YORDAMCHI / MEDIA DOWNLOAD (Instagram Save / YouTube Save)
+# =========================================================
+#
+# MUHIM: bu limitlar Instagram Save VA YouTube Save uchun UMUMIY,
+# markazlashtirilgan yuklab olish mexanizmini boshqaradi
+# (app/services/media_downloader_common.py — bitta semaphore,
+# ikkala platforma uchun ham serverning umumiy yukini nazorat
+# qiladi). .env orqali sozlanishi mumkin; sozlanmasa xavfsiz
+# standart qiymatlar ishlatiladi.
+
+YOUTUBE_MAX_FILE_SIZE_MB_RAW = get_env(
+    "YOUTUBE_MAX_FILE_SIZE_MB",
+    "50",
+)
+
+try:
+    YOUTUBE_MAX_FILE_SIZE_MB = int(YOUTUBE_MAX_FILE_SIZE_MB_RAW)
+except ValueError:
+    YOUTUBE_MAX_FILE_SIZE_MB = 50
+
+MAX_CONCURRENT_YOUTUBE_DOWNLOADS_RAW = get_env(
+    "MAX_CONCURRENT_YOUTUBE_DOWNLOADS",
+    "2",
+)
+
+try:
+    MAX_CONCURRENT_YOUTUBE_DOWNLOADS = int(
+        MAX_CONCURRENT_YOUTUBE_DOWNLOADS_RAW
+    )
+except ValueError:
+    MAX_CONCURRENT_YOUTUBE_DOWNLOADS = 2
+
+# MUHIM (root cause — "serverda sozlanmagan" xatosi): ffmpeg
+# ba'zan PATH orqali topilmaydi — masalan systemd xizmati
+# interaktiv shell'dan FARQLI, minimal PATH muhitida ishlaydi.
+# Bo'sh qoldirilsa, avtomatik aniqlash (PATH + odatiy o'rnatish
+# joylari) ishlatiladi; kerak bo'lsa, aniq absolyut yo'lni shu
+# yerda ko'rsating (masalan "/usr/bin/ffmpeg").
+FFMPEG_PATH = get_env("FFMPEG_PATH", "")

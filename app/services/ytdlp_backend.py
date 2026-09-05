@@ -7,6 +7,7 @@ import os
 import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.config import FFMPEG_PATH
 from app.services.media_downloader_common import (
     DOWNLOAD_TIMEOUT_SECONDS,
     MAX_CAROUSEL_ITEMS,
@@ -53,17 +54,83 @@ class _SilentYtDlpLogger:
         pass
 
 
+def is_yt_dlp_available() -> bool:
+    """
+    yt-dlp kutubxonasi (Python paketi sifatida) o'rnatilgan va
+    import qilinishi mumkinmi — tekshiradi.
+
+    MUHIM (root cause tuzatildi): "⚠️ Bu funksiya hozircha
+    serverda sozlanmagan" xabari ILGARI `is_ffmpeg_available()`
+    ga bog'liq edi — bu NOTO'G'RI edi, chunki ffmpeg yo'qligi
+    "funksiya butunlay sozlanmagan" degani EMAS (ko'p Instagram
+    va hatto ba'zi YouTube formatlari ffmpeg'siz ham ishlaydi).
+    Bu xabar ENDI faqat yt-dlp'ning O'ZI mavjud bo'lmaganda
+    ko'rsatiladi — ffmpeg yo'qligi alohida, download vaqtidagi
+    ("unavailable") xatolik sifatida, faqat HAQIQATAN merge talab
+    qiladigan videolar uchungina yuzaga keladi.
+    """
+
+    try:
+        import yt_dlp  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+_COMMON_FFMPEG_PATHS = (
+    "/usr/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+    "/snap/bin/ffmpeg",
+)
+
+
+def resolve_ffmpeg_location() -> Optional[str]:
+    """
+    ffmpeg'ning haqiqiy joylashuvini aniqlaydi.
+
+    MUHIM: faqat `shutil.which("ffmpeg")` (joriy protsessning
+    PATH muhitiga bog'liq) ga tayanish YETARLI EMAS — systemd
+    xizmati ko'pincha interaktiv shelldan FARQLI, minimal PATH
+    muhitida ishga tushadi, shu sabab ffmpeg serverda HAQIQATAN
+    o'rnatilgan bo'lsa ham topilmasligi mumkin. Shu sabab:
+    1) avval aniq `.env` sozlamasi (FFMPEG_PATH) tekshiriladi;
+    2) keyin joriy PATH (`shutil.which`);
+    3) keyin eng ko'p tarqalgan o'rnatish joylari.
+    Topilgan yo'l `yt-dlp`ga `ffmpeg_location` orqali TO'G'RIDAN-
+    TO'G'RI beriladi — shu orqali yt-dlp o'zi PATH orqali qayta
+    "taxmin qilishi" shart bo'lmaydi (bir xil muammoni takrorlash
+    xavfisiz).
+    """
+
+    if FFMPEG_PATH and os.path.isfile(FFMPEG_PATH):
+        return FFMPEG_PATH
+
+    found = shutil.which("ffmpeg")
+
+    if found:
+        return found
+
+    for candidate in _COMMON_FFMPEG_PATHS:
+        if os.path.isfile(candidate):
+            return candidate
+
+    return None
+
+
 def is_ffmpeg_available() -> bool:
     """
     Zamonaviy YouTube (va ko'plab boshqa platformalar) video
     va audio oqimlarini ALOHIDA beradi — ularni bitta faylga
-    birlashtirish uchun ffmpeg SHART. ffmpeg serverda
-    o'rnatilmagan bo'lsa, bu funksiya False qaytaradi va
-    yuklab olish urinishi boshlanmasdan oldin foydalanuvchiga
-    aniq xabar ko'rsatiladi.
+    birlashtirish uchun ffmpeg SHART bo'lishi mumkin.
+
+    MUHIM: bu funksiya ENDI YouTube Save/Insta Save'ga KIRISHNI
+    bloklash uchun ISHLATILMAYDI (buning uchun
+    `is_yt_dlp_available()`ga qarang) — faqat merge kerak bo'lgan
+    ANIQ bir yuklab olish urinishida ffmpeg mavjudligini bilish
+    uchun ishlatiladi.
     """
 
-    return shutil.which("ffmpeg") is not None
+    return resolve_ffmpeg_location() is not None
 
 
 def _blocking_download(
@@ -130,6 +197,16 @@ def _blocking_download(
         "retries": 2,
         "noprogress": True,
     }
+
+    # MUHIM (root cause tuzatildi): ffmpeg joylashuvi bu yerda
+    # ANIQ ko'rsatiladi — yt-dlp'ning ICHKI PATH-asosli avtomatik
+    # aniqlashiga tayanilmaydi (u ham xuddi shu PATH muammosiga
+    # duch kelishi mumkin, masalan systemd xizmatining minimal
+    # PATH muhitida).
+    ffmpeg_location = resolve_ffmpeg_location()
+
+    if ffmpeg_location:
+        ydl_opts["ffmpeg_location"] = ffmpeg_location
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=True)
@@ -345,4 +422,6 @@ async def run_download(url: str) -> DownloadResult:
 __all__ = [
     "run_download",
     "is_ffmpeg_available",
+    "is_yt_dlp_available",
+    "resolve_ffmpeg_location",
 ]
