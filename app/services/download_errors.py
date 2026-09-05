@@ -78,6 +78,25 @@ _ORDERED_MARKERS = (
         ),
     ),
     (
+        # MUHIM (real production sinovi bilan topilgan — Instagram):
+        # noto'g'ri/mavjud bo'lmagan shortcode uchun yt-dlp'ning
+        # Instagram extractori "bo'sh javob" degan umumiy xabar
+        # beradi va — chalkashtiruvchi tarzda — ".. use --cookies
+        # for authentication" deb ham qo'shib qo'yadi, GARCHI
+        # haqiqiy sabab shunchaki "bunday post yo'q" bo'lsa ham.
+        # Shu sabab bu ANIQ ibora LOGIN_REQUIRED'dan OLDIN
+        # tekshiriladi — NOT_FOUND ko'proq to'g'ri signal.
+        NOT_FOUND,
+        (
+            "empty media response",
+            "404",
+            "unable to find",
+            "no longer exists",
+            "page not found",
+            "content unavailable",
+        ),
+    ),
+    (
         # MUHIM (real production sinovi bilan topilgan): YouTube
         # ba'zan xuddi shu bot-tekshiruvini video MA'LUMOTLARINI
         # yuklab olish bosqichida (CDN darajasida) oddiy "HTTP
@@ -104,16 +123,6 @@ _ORDERED_MARKERS = (
             "blocked it in your country",
             "geo-restrict",
             "georestrict",
-        ),
-    ),
-    (
-        NOT_FOUND,
-        (
-            "404",
-            "unable to find",
-            "no longer exists",
-            "page not found",
-            "content unavailable",
         ),
     ),
     (
