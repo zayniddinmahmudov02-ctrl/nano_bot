@@ -78,21 +78,44 @@ def _blocking_download(
     import yt_dlp
 
     ydl_opts = {
-        # MUHIM (real testlar bilan tasdiqlangan): oldingi
-        # `best[acodec!=none][vcodec!=none]` filtri ko'plab
-        # provayderlarda (masalan Instagram) codec maydonlari
-        # "noma'lum" (None) bo'lgan, lekin AMALDA to'liq
-        # (audio+video birlashtirilgan, ffmpeg SHART EMAS)
-        # formatlarni NOTO'G'RI rad etib, keraksiz ravishda
-        # ffmpeg talab qiluvchi bestvideo+bestaudio yo'liga
-        # tushirib yuborar edi. Oddiy "best" — yt-dlp'ning o'z
-        # ichki tanlash mantig'i — bunday formatlarni to'g'ri
-        # tanlaydi; faqat HAQIQATAN alohida video/audio
-        # oqimlaridan boshqa hech narsa mavjud bo'lmagan holatda
-        # (masalan zamonaviy YouTube) ikkinchi variant —
-        # bestvideo+bestaudio (ffmpeg orqali birlashtirish) —
-        # ishga tushadi.
-        "format": "best/bestvideo+bestaudio",
+        # MUHIM (real testlar bilan 2 marta tasdiqlangan/tuzatilgan):
+        #
+        # 1) `best[acodec!=none][vcodec!=none]` (qattiq filtr) ko'plab
+        #    provayderlarda (masalan Instagram) codec maydonlari
+        #    "noma'lum" (None, string "none" EMAS) bo'lgan, lekin
+        #    AMALDA to'liq formatlarni NOTO'G'RI rad etardi — `?`
+        #    ("none-inclusive") operatori shu muammoni SUFFIKS
+        #    sifatida to'g'ri hal qiladi: `!=?none` — agar qiymat
+        #    NOMA'LUM bo'lsa OK (o'tkazib yuboradi), agar ANIQ "none"
+        #    ga teng bo'lsa (haqiqatan audio/video yo'q) — rad etadi.
+        #
+        # 2) Oddiy filtrsiz "best" (birinchi versiyada ishlatilgan)
+        #    ba'zan haqiqatan AUDIOSIZ (video-only) oqimni "eng
+        #    sifatli" deb tanlab qo'yishi mumkin edi (agar u eng
+        #    yuqori bitrate/resolution'ga ega bo'lsa) — natijada
+        #    ovozsiz video yuborilib qolardi. `[acodec!=?none]
+        #    [vcodec!=?none]` filtri buni oldini oladi: audio/video
+        #    ANIQ yo'q (literal "none") formatlar birinchi
+        #    variantdan chiqarib tashlanadi.
+        #
+        # 3) `filesize`/`filesize_approx` chegarasi — Telegram limitiga
+        #    (MAX_FILE_SIZE_BYTES) SIG'ADIGAN formatga USTUNLIK
+        #    beradi (bor bo'lsa) — shu orqali server avval katta
+        #    formatni yuklab, keyin uni rad etish o'rniga, iloji
+        #    boricha to'g'ri hajmni OLDINDAN tanlaydi.
+        #
+        # Yakuniy fallback (`bestvideo+bestaudio`) — faqat HAQIQATAN
+        # audio+video birlashtirilgan formatning o'zi mavjud
+        # bo'lmagan holatlarda (masalan zamonaviy YouTube) ishga
+        # tushadi — bu holatda ffmpeg SHART.
+        "format": (
+            f"best[filesize<{MAX_FILE_SIZE_BYTES}]"
+            f"[acodec!=?none][vcodec!=?none]/"
+            f"best[filesize_approx<{MAX_FILE_SIZE_BYTES}]"
+            f"[acodec!=?none][vcodec!=?none]/"
+            f"best[acodec!=?none][vcodec!=?none]/"
+            f"bestvideo+bestaudio/best"
+        ),
         "merge_output_format": "mp4",
         "outtmpl": output_path,
         "quiet": True,

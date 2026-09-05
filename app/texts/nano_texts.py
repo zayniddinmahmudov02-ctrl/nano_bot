@@ -180,28 +180,72 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "de": "🤝 <b>Nano-Assistent</b>\n\nMedien-Assistent-Funktionen:",
     },
     "btn_youtube_save": {
-        "uz": "▶️ YouTube-Save",
-        "ru": "▶️ YouTube-Save",
-        "en": "▶️ YouTube-Save",
-        "de": "▶️ YouTube-Save",
+        "uz": "▶️ YouTube Save",
+        "ru": "▶️ YouTube Save",
+        "en": "▶️ YouTube Save",
+        "de": "▶️ YouTube Save",
     },
     "btn_insta_save": {
-        "uz": "📸 Insta-Save",
-        "ru": "📸 Insta-Save",
-        "en": "📸 Insta-Save",
-        "de": "📸 Insta-Save",
+        "uz": "📥 Instagram Save",
+        "ru": "📥 Instagram Save",
+        "en": "📥 Instagram Save",
+        "de": "📥 Instagram Save",
     },
     "youtube_prompt": {
-        "uz": "▶️ <b>YouTube-Save</b>\n\n🎬 YouTube video havolasini yuboring.",
-        "ru": "▶️ <b>YouTube-Save</b>\n\n🎬 Отправьте ссылку на видео YouTube.",
-        "en": "▶️ <b>YouTube-Save</b>\n\n🎬 Send a YouTube video link.",
-        "de": "▶️ <b>YouTube-Save</b>\n\n🎬 Senden Sie einen YouTube-Video-Link.",
+        "uz": (
+            "▶️ <b>YouTube Save</b>\n\n"
+            "YouTube video yoki Shorts havolasini yuboring.\n\n"
+            "Masalan:\n"
+            "https://youtu.be/..."
+        ),
+        "ru": (
+            "▶️ <b>YouTube Save</b>\n\n"
+            "Отправьте ссылку на видео YouTube или Shorts.\n\n"
+            "Например:\n"
+            "https://youtu.be/..."
+        ),
+        "en": (
+            "▶️ <b>YouTube Save</b>\n\n"
+            "Send a YouTube video or Shorts link.\n\n"
+            "Example:\n"
+            "https://youtu.be/..."
+        ),
+        "de": (
+            "▶️ <b>YouTube Save</b>\n\n"
+            "Senden Sie einen YouTube-Video- oder Shorts-Link.\n\n"
+            "Beispiel:\n"
+            "https://youtu.be/..."
+        ),
     },
     "insta_prompt": {
-        "uz": "📸 <b>Insta-Save</b>\n\n📎 Instagram havolasini yuboring.",
-        "ru": "📸 <b>Insta-Save</b>\n\n📎 Отправьте ссылку на Instagram.",
-        "en": "📸 <b>Insta-Save</b>\n\n📎 Send an Instagram link.",
-        "de": "📸 <b>Insta-Save</b>\n\n📎 Senden Sie einen Instagram-Link.",
+        "uz": (
+            "📥 <b>Instagram Save</b>\n\n"
+            "Instagram'dan post, reel, video, photo yoki carousel "
+            "havolasini yuboring.\n\n"
+            "Masalan:\n"
+            "https://www.instagram.com/reel/..."
+        ),
+        "ru": (
+            "📥 <b>Instagram Save</b>\n\n"
+            "Отправьте ссылку на пост, reel, видео, фото или "
+            "carousel из Instagram.\n\n"
+            "Например:\n"
+            "https://www.instagram.com/reel/..."
+        ),
+        "en": (
+            "📥 <b>Instagram Save</b>\n\n"
+            "Send an Instagram post, reel, video, photo, or "
+            "carousel link.\n\n"
+            "Example:\n"
+            "https://www.instagram.com/reel/..."
+        ),
+        "de": (
+            "📥 <b>Instagram Save</b>\n\n"
+            "Senden Sie einen Instagram-Post-, Reel-, Video-, "
+            "Foto- oder Carousel-Link.\n\n"
+            "Beispiel:\n"
+            "https://www.instagram.com/reel/..."
+        ),
     },
     "download_invalid_url": {
         "uz": "❌ Havola noto'g'ri yoki qo'llab-quvvatlanmaydi.",
@@ -210,16 +254,22 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "de": "❌ Der Link ist ungültig oder wird nicht unterstützt.",
     },
     "download_private_blocked": {
-        "uz": "❌ Faqat ochiq (public) kontent bilan ishlaymiz. Maxfiy/himoyalangan akkaunt kontenti yuklab bo'lmaydi.",
-        "ru": "❌ Работаем только с публичным контентом. Контент закрытого аккаунта скачать нельзя.",
-        "en": "❌ Only public content is supported. Content from private/protected accounts cannot be downloaded.",
-        "de": "❌ Nur öffentliche Inhalte werden unterstützt. Inhalte privater/geschützter Konten können nicht heruntergeladen werden.",
+        "uz": "❌ Bu kontent public emas yoki yuklab olish uchun mavjud emas.",
+        "ru": "❌ Этот контент не публичный или недоступен для скачивания.",
+        "en": "❌ This content isn't public or isn't available for download.",
+        "de": "❌ Dieser Inhalt ist nicht öffentlich oder nicht zum Herunterladen verfügbar.",
     },
     "download_in_progress": {
-        "uz": "⏳ Yuklab olinmoqda, biroz kuting...",
-        "ru": "⏳ Загрузка, подождите...",
-        "en": "⏳ Downloading, please wait...",
-        "de": "⏳ Wird heruntergeladen, bitte warten...",
+        "uz": "⏳ Yuklanmoqda...",
+        "ru": "⏳ Загрузка...",
+        "en": "⏳ Downloading...",
+        "de": "⏳ Wird heruntergeladen...",
+    },
+    "download_preparing": {
+        "uz": "📦 Tayyorlanmoqda...",
+        "ru": "📦 Подготовка...",
+        "en": "📦 Preparing...",
+        "de": "📦 Wird vorbereitet...",
     },
     "download_ready": {
         "uz": "✅ Tayyor!",
@@ -228,10 +278,10 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "de": "✅ Fertig!",
     },
     "download_too_large": {
-        "uz": "❌ Fayl hajmi ruxsat etilgan chegaradan katta.",
-        "ru": "❌ Размер файла превышает допустимый лимит.",
-        "en": "❌ File size exceeds the allowed limit.",
-        "de": "❌ Die Dateigröße überschreitet das zulässige Limit.",
+        "uz": "📦 Fayl hajmi juda katta.",
+        "ru": "📦 Размер файла слишком большой.",
+        "en": "📦 The file is too large.",
+        "de": "📦 Die Datei ist zu groß.",
     },
     "download_busy": {
         "uz": "⏳ Hozircha yuklab olishlar band. Birozdan keyin qayta urinib ko'ring.",
@@ -239,11 +289,29 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "⏳ All download slots are busy right now. Please try again shortly.",
         "de": "⏳ Alle Download-Plätze sind derzeit belegt. Bitte versuchen Sie es später erneut.",
     },
+    "download_timeout": {
+        "uz": "⏱ Yuklab olish vaqti tugadi. Keyinroq qayta urinib ko'ring.",
+        "ru": "⏱ Время загрузки истекло. Попробуйте позже.",
+        "en": "⏱ The download timed out. Please try again later.",
+        "de": "⏱ Zeitüberschreitung beim Herunterladen. Bitte versuchen Sie es später erneut.",
+    },
     "download_failed": {
         "uz": "❌ Yuklab olishda xatolik yuz berdi. Havolani tekshirib qayta urinib ko'ring.",
         "ru": "❌ Ошибка при загрузке. Проверьте ссылку и попробуйте снова.",
         "en": "❌ Download failed. Please check the link and try again.",
         "de": "❌ Download fehlgeschlagen. Bitte überprüfen Sie den Link und versuchen Sie es erneut.",
+    },
+    "download_failed_instagram": {
+        "uz": "❌ Instagram postni yuklab bo'lmadi.",
+        "ru": "❌ Не удалось скачать пост из Instagram.",
+        "en": "❌ Couldn't download the Instagram post.",
+        "de": "❌ Der Instagram-Beitrag konnte nicht heruntergeladen werden.",
+    },
+    "download_failed_youtube": {
+        "uz": "❌ YouTube videoni yuklab bo'lmadi.",
+        "ru": "❌ Не удалось скачать видео с YouTube.",
+        "en": "❌ Couldn't download the YouTube video.",
+        "de": "❌ Das YouTube-Video konnte nicht heruntergeladen werden.",
     },
     "download_unavailable": {
         "uz": "⚠️ Bu funksiya hozircha serverda sozlanmagan.",

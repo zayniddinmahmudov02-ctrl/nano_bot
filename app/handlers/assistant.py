@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional, Tuple
 
 from aiogram import F, Router
@@ -51,10 +52,24 @@ _ERROR_TEXT_KEYS = {
     "private": "download_private_blocked",
     "too_large": "download_too_large",
     "busy": "download_busy",
-    "timeout": "download_failed",
+    "timeout": "download_timeout",
     "unavailable": "download_unavailable",
     "failed": "download_failed",
 }
+
+# MUHIM (spec 15-bo'lim): umumiy "yuklab bo'lmadi" xatosi Instagram
+# va YouTube uchun ALOHIDA, aniqroq matn bilan ko'rsatiladi.
+_PLATFORM_FAILED_TEXT_KEYS = {
+    "instagram": "download_failed_instagram",
+    "youtube": "download_failed_youtube",
+}
+
+
+def _error_text_key(error_code: str, platform: str) -> str:
+    if error_code == "failed":
+        return _PLATFORM_FAILED_TEXT_KEYS.get(platform, "download_failed")
+
+    return _ERROR_TEXT_KEYS.get(error_code, "download_failed")
 
 
 # ============================================================
@@ -316,10 +331,18 @@ async def _send_media_file(
         return False
 
 
+async def _safe_status_edit(status_message: Message, text: str) -> None:
+    try:
+        await status_message.edit_text(text)
+    except Exception:
+        pass
+
+
 async def _run_download_flow(
     message: Message,
     lang: str,
     url: str,
+    platform: str,
     download_fn,
 ) -> None:
     """
@@ -327,9 +350,22 @@ async def _run_download_flow(
     yuklab olish -> media(lar)ni to'g'ri turda yuborish -> vaqtin-
     cha fayllarni tozalash.
 
+    Status bitta xabar (edit qilinadi, yangi xabarlar ko'paytiril-
+    maydi) orqali bosqichma-bosqich yangilanadi (spec 14-bo'lim):
+    "⏳ Yuklanmoqda..." -> "📦 Tayyorlanmoqda..." -> "✅ Tayyor!"
+
     MUHIM: havolaning o'zi (URL) hech qachon logga yozilmaydi —
-    faqat umumiy, xavfsiz xabarlar.
+    faqat umumiy, xavfsiz xabarlar (spec 16-bo'lim: user_id,
+    platform, media_type, natija — URL'siz).
     """
+
+    telegram_id = int(message.from_user.id)
+
+    logger.info(
+        "%s Save START: user_id=%s",
+        platform.capitalize(),
+        telegram_id,
+    )
 
     status_message = await message.answer(
         t("download_in_progress", lang)
@@ -338,9 +374,14 @@ async def _run_download_flow(
     result: DownloadResult = await download_fn(url)
 
     if not result.ok:
-        text_key = _ERROR_TEXT_KEYS.get(
-            result.error_code, "download_failed"
+        logger.warning(
+            "%s Save FAILED: user_id=%s, error=%s",
+            platform.capitalize(),
+            telegram_id,
+            result.error_code,
         )
+
+        text_key = _error_text_key(result.error_code, platform)
 
         try:
             await status_message.edit_text(t(text_key, lang))
@@ -349,40 +390,68 @@ async def _run_download_flow(
 
         return
 
+    await _safe_status_edit(status_message, t("download_preparing", lang))
+
     all_files = [
         (result.file_path, result.media_type or "document", result.title)
     ]
     all_files.extend(result.extra_files or [])
 
     try:
-        try:
-            await status_message.edit_text(t("download_ready", lang))
-        except Exception:
-            pass
-
         sent_any = False
+        total_size = 0
 
-        for file_path, media_type, title in all_files:
+        for index, (file_path, media_type, title) in enumerate(all_files):
+            # MUHIM (spec 23-bo'lim): carousel bo'lsa, caption FAQAT
+            # birinchi elementga beriladi — qolganlari captionsiz.
+            caption = title if index == 0 else None
+
+            try:
+                total_size += os.path.getsize(file_path)
+            except OSError:
+                pass
+
             sent = await _send_media_file(
                 message,
                 file_path=file_path,
                 media_type=media_type,
-                caption=title,
+                caption=caption,
             )
             sent_any = sent_any or sent
 
-        if not sent_any:
+        if sent_any:
+            await _safe_status_edit(
+                status_message, t("download_ready", lang)
+            )
+
+            logger.info(
+                "%s Save SUCCESS: user_id=%s, media_type=%s, size=%s",
+                platform.capitalize(),
+                telegram_id,
+                result.media_type,
+                total_size,
+            )
+        else:
+            text_key = _error_text_key("failed", platform)
+
+            await _safe_status_edit(status_message, t(text_key, lang))
+
             try:
-                await status_message.edit_text(
-                    t("download_failed", lang)
-                )
+                await message.answer(t(text_key, lang))
             except Exception:
-                await message.answer(t("download_failed", lang))
+                pass
+
+            logger.warning(
+                "%s Save FAILED: user_id=%s, error=send_failed",
+                platform.capitalize(),
+                telegram_id,
+            )
 
     finally:
-        # Media Telegramga yuborilgach — vaqtinchalik fayl(lar)
-        # DARHOL o'chiriladi. Hech qanday holatda diskda
-        # qoldirilmaydi va PostgreSQL'ga yozilmaydi.
+        # Media Telegramga yuborilgach (yoki xatolik bo'lgan taqdirda
+        # ham) — vaqtinchalik fayl(lar) DARHOL o'chiriladi. Hech
+        # qanday holatda diskda qoldirilmaydi va PostgreSQL'ga
+        # yozilmaydi.
         cleanup_file(result.file_path)
 
         for file_path, _media_type, _title in (
@@ -416,7 +485,9 @@ async def assistant_receive_youtube_url(
 
     await state.clear()
 
-    await _run_download_flow(message, lang, url, download_youtube)
+    await _run_download_flow(
+        message, lang, url, "youtube", download_youtube
+    )
 
 
 @router.message(AssistantStates.waiting_instagram_url)
@@ -444,7 +515,9 @@ async def assistant_receive_instagram_url(
 
     await state.clear()
 
-    await _run_download_flow(message, lang, url, download_instagram)
+    await _run_download_flow(
+        message, lang, url, "instagram", download_instagram
+    )
 
 
 @router.message(StateFilter(None), _has_recognized_link)
@@ -482,10 +555,14 @@ async def assistant_auto_detect_link(
             await message.answer(t("download_unavailable", lang))
             return
 
-        await _run_download_flow(message, lang, url, download_youtube)
+        await _run_download_flow(
+            message, lang, url, "youtube", download_youtube
+        )
         return
 
-    await _run_download_flow(message, lang, url, download_instagram)
+    await _run_download_flow(
+        message, lang, url, "instagram", download_instagram
+    )
 
 
 __all__ = [

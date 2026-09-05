@@ -94,8 +94,8 @@ GUIDE_STEPS = [
     (
         "6️⃣ Nano-Yordamchi orqali video",
         "🤝 <b>Nano-Yordamchi orqali video link yuborish</b>\n\n"
-        "Nano-Yordamchi → ▶️ YouTube-Save yoki 📸 "
-        "Insta-Save bo'limiga kirib, ochiq (public) "
+        "Nano-Yordamchi → ▶️ YouTube Save yoki 📥 "
+        "Instagram Save bo'limiga kirib, ochiq (public) "
         "havolani yuboring.",
     ),
     (
