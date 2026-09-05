@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.database import AsyncSessionLocal
@@ -369,27 +369,51 @@ async def get_due_reminders(
         ]
 
 
-async def mark_reminder_sent(record_id: int) -> None:
+async def try_claim_reminder(record_id: int) -> bool:
+    """
+    Reminder xabarini YUBORISHDAN OLDIN chaqiriladi — yozuvni
+    ATOMIK ravishda "band" qiladi (bitta UPDATE ... WHERE
+    statement orqali, check-then-act oralig'isiz).
+
+    MUHIM (race condition — spec 6/8-bo'lim): `get_due_reminders()`
+    so'rovi va haqiqiy xabar yuborish orasida biroz vaqt o'tadi
+    (bir nechta yozuv, tarmoq chaqiruvlari). Agar shu oraliqda
+    foydalanuvchi javob yozib, `mark_answered()` yozuvni ANSWERED
+    qilib ulgursa — bu funksiya False qaytaradi va reminder HECH
+    QACHON yuborilmaydi (USER REPLY har doim ustunlik qiladi).
+
+    Faqat `status='UNANSWERED' AND reminder_sent=False` bo'lgan
+    yozuv uchun bitta martalik "yutib olish" (claim) muvaffaqiyatli
+    bo'ladi — shu bitta UPDATE statement o'zi ham ikkita parallel
+    scheduler tsikli bir xil yozuvni ikki marta yubormasligini
+    kafolatlaydi.
+    """
+
     try:
         async with AsyncSessionLocal() as session:
-            record = await session.get(
-                UnansweredChat, record_id
+            result = await session.execute(
+                update(UnansweredChat)
+                .where(
+                    UnansweredChat.id == record_id,
+                    UnansweredChat.status == STATUS_UNANSWERED,
+                    UnansweredChat.reminder_sent.is_(False),
+                )
+                .values(
+                    reminder_sent=True,
+                    reminder_sent_at=_now(),
+                )
             )
-
-            if record is None:
-                return
-
-            record.reminder_sent = True
-            record.reminder_sent_at = _now()
 
             await session.commit()
 
+            return result.rowcount > 0
+
     except Exception:
         logger.exception(
-            "reminder_sent belgilashda xatolik "
-            "(record_id=%s).",
+            "Reminder claim qilishda xatolik (record_id=%s).",
             record_id,
         )
+        return False
 
 
 __all__ = [
@@ -405,5 +429,5 @@ __all__ = [
     "get_unanswered_stats",
     "ReminderTarget",
     "get_due_reminders",
-    "mark_reminder_sent",
+    "try_claim_reminder",
 ]

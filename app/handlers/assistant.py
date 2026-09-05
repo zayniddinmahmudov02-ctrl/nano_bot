@@ -34,6 +34,24 @@ from app.services.youtube_downloader_service import (
 from app.services.youtube_downloader_service import (
     validate_url as validate_youtube_url,
 )
+from app.services.download_errors import (
+    AGE_RESTRICTED,
+    BUSY,
+    EXTRACTOR_ERROR,
+    FFMPEG_ERROR,
+    FILE_TOO_LARGE,
+    GEO_RESTRICTED,
+    INVALID_URL,
+    LOGIN_REQUIRED,
+    NETWORK_ERROR,
+    NOT_FOUND,
+    PRIVATE,
+    RATE_LIMITED,
+    TIMEOUT,
+    UNKNOWN,
+    VIDEO_UNAVAILABLE,
+    YT_DLP_UNAVAILABLE,
+)
 from app.services.ytdlp_backend import is_yt_dlp_available
 from app.texts import t, t_all
 
@@ -47,27 +65,43 @@ class AssistantStates(StatesGroup):
     waiting_instagram_url = State()
 
 
+# MUHIM (spec 8-bo'lim — markazlashtirilgan xatolik xabarlari):
+# har bir standart kod (app.services.download_errors) uchun ANIQ,
+# alohida matn. "⚠️ Bu funksiya hozircha serverda sozlanmagan."
+# FAQAT YT_DLP_UNAVAILABLE uchun ishlatiladi — boshqa hech qanday
+# kod (masalan FFMPEG_ERROR yoki EXTRACTOR_ERROR) bu umumiy
+# xabarga "yashirinmaydi".
 _ERROR_TEXT_KEYS = {
-    "invalid_url": "download_invalid_url",
-    "private": "download_private_blocked",
-    "too_large": "download_too_large",
-    "busy": "download_busy",
-    "timeout": "download_timeout",
-    "unavailable": "download_unavailable",
-    "failed": "download_failed",
+    YT_DLP_UNAVAILABLE: "download_unavailable",
+    INVALID_URL: "download_invalid_url",
+    BUSY: "download_busy",
+    PRIVATE: "download_private_blocked",
+    LOGIN_REQUIRED: "download_login_required",
+    AGE_RESTRICTED: "download_age_restricted",
+    VIDEO_UNAVAILABLE: "download_video_unavailable",
+    NOT_FOUND: "download_not_found",
+    GEO_RESTRICTED: "download_geo_restricted",
+    RATE_LIMITED: "download_rate_limited",
+    TIMEOUT: "download_timeout",
+    NETWORK_ERROR: "download_network_error",
+    FILE_TOO_LARGE: "download_too_large",
+    FFMPEG_ERROR: "download_ffmpeg_error",
+    EXTRACTOR_ERROR: "download_extractor_error",
 }
 
-# MUHIM (spec 15-bo'lim): umumiy "yuklab bo'lmadi" xatosi Instagram
-# va YouTube uchun ALOHIDA, aniqroq matn bilan ko'rsatiladi.
-_PLATFORM_FAILED_TEXT_KEYS = {
+# MUHIM (spec 15-bo'lim): UNKNOWN xatolik Instagram va YouTube
+# uchun ALOHIDA, aniqroq matn bilan ko'rsatiladi.
+_PLATFORM_UNKNOWN_TEXT_KEYS = {
     "instagram": "download_failed_instagram",
     "youtube": "download_failed_youtube",
 }
 
 
 def _error_text_key(error_code: str, platform: str) -> str:
-    if error_code == "failed":
-        return _PLATFORM_FAILED_TEXT_KEYS.get(platform, "download_failed")
+    if error_code == UNKNOWN or error_code is None:
+        return _PLATFORM_UNKNOWN_TEXT_KEYS.get(
+            platform, "download_failed"
+        )
 
     return _ERROR_TEXT_KEYS.get(error_code, "download_failed")
 
@@ -438,7 +472,7 @@ async def _run_download_flow(
                 total_size,
             )
         else:
-            text_key = _error_text_key("failed", platform)
+            text_key = _error_text_key(UNKNOWN, platform)
 
             await _safe_status_edit(status_message, t(text_key, lang))
 

@@ -8,6 +8,12 @@ import shutil
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import FFMPEG_PATH
+from app.services.download_errors import (
+    FILE_TOO_LARGE,
+    TIMEOUT,
+    UNKNOWN,
+    classify_download_exception,
+)
 from app.services.media_downloader_common import (
     DOWNLOAD_TIMEOUT_SECONDS,
     MAX_CAROUSEL_ITEMS,
@@ -324,74 +330,32 @@ async def run_download(url: str) -> DownloadResult:
         logger.warning(
             "Yuklab olish vaqt chegarasidan oshdi (timeout)."
         )
-        return DownloadResult(ok=False, error_code="timeout")
-
-    except ImportError:
-        logger.error(
-            "yt-dlp kutubxonasi o'rnatilmagan."
-        )
-        return DownloadResult(
-            ok=False, error_code="unavailable"
-        )
+        return DownloadResult(ok=False, error_code=TIMEOUT)
 
     except Exception as error:
         _cleanup_all(glob_pattern)
 
-        message = str(error).lower()
+        # MUHIM (markazlashtirilgan tasnif): xatolik matni bu
+        # yerda hech qachon foydalanuvchiga ko'rsatilmaydi va
+        # o'zi holida logga yozilmaydi — faqat standart kod
+        # (masalan "AGE_RESTRICTED") va exception TURI. `exc_info`
+        # faqat haqiqatan kutilmagan (UNKNOWN) holatlar uchun
+        # to'liq traceback bilan yoziladi.
+        code = classify_download_exception(error)
 
-        if "ffmpeg" in message:
-            logger.error(
-                "yt-dlp: ffmpeg serverda o'rnatilmagan — "
-                "video/audio birlashtirish imkonsiz."
+        if code == UNKNOWN:
+            logger.exception(
+                "Yuklab olishda kutilmagan xatolik: %s",
+                type(error).__name__,
             )
-            return DownloadResult(
-                ok=False, error_code="unavailable"
-            )
-
-        if any(
-            keyword in message
-            for keyword in (
-                "private",
-                "login",
-                "sign in",
-                "restricted",
-                "rate-limit",
-            )
-        ):
+        else:
             logger.warning(
-                "Yuklab olish rad etildi: maxfiy/himoyalangan "
-                "kontent."
-            )
-            return DownloadResult(
-                ok=False, error_code="private"
+                "Yuklab olish rad etildi: %s (%s)",
+                code,
+                type(error).__name__,
             )
 
-        if any(
-            keyword in message
-            for keyword in ("max-filesize", "too large", "filesize")
-        ):
-            logger.warning(
-                "Yuklab olish rad etildi: fayl hajmi "
-                "chegaradan katta."
-            )
-            return DownloadResult(
-                ok=False, error_code="too_large"
-            )
-
-        if "requested format is not available" in message:
-            logger.warning(
-                "Yuklab olish rad etildi: mos format topilmadi "
-                "(server ffmpeg'siz birlashtira olmadi bo'lishi "
-                "mumkin)."
-            )
-            return DownloadResult(
-                ok=False, error_code="unavailable"
-            )
-
-        logger.exception(
-            "Yuklab olishda kutilmagan xatolik."
-        )
-        return DownloadResult(ok=False, error_code="failed")
+        return DownloadResult(ok=False, error_code=code)
 
     if info is None:
         _cleanup_all(glob_pattern)
@@ -400,7 +364,7 @@ async def run_download(url: str) -> DownloadResult:
             "xatolik ko'tarmadi, lekin ma'lumot (info) ham "
             "qaytarmadi."
         )
-        return DownloadResult(ok=False, error_code="failed")
+        return DownloadResult(ok=False, error_code=UNKNOWN)
 
     # Carousel (playlist) bo'lsa bir nechta entry, aks holda —
     # bitta "entry" sifatida o'zi.
@@ -450,7 +414,7 @@ async def run_download(url: str) -> DownloadResult:
                 "Yuklab olish rad etildi: barcha nomzod "
                 "fayl(lar) hajm chegarasidan katta edi."
             )
-            return DownloadResult(ok=False, error_code="too_large")
+            return DownloadResult(ok=False, error_code=FILE_TOO_LARGE)
 
         logger.warning(
             "Yuklab olish muvaffaqiyatsiz: yt-dlp ma'lumot "
@@ -458,7 +422,7 @@ async def run_download(url: str) -> DownloadResult:
             "fayl topilmadi (masalan merge tugallanmagan yoki "
             "fayl yo'li noto'g'ri aniqlangan bo'lishi mumkin)."
         )
-        return DownloadResult(ok=False, error_code="failed")
+        return DownloadResult(ok=False, error_code=UNKNOWN)
 
     first_path, first_media_type, first_title = accepted[0]
 

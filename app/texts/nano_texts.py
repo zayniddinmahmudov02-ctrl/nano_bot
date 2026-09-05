@@ -319,6 +319,60 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "⚠️ This feature is not configured on the server yet.",
         "de": "⚠️ Diese Funktion ist auf dem Server noch nicht konfiguriert.",
     },
+    "download_login_required": {
+        "uz": "🔒 Bu kontentni ko'rish uchun tizimga kirilgan (login) sessiya kerak. Bu hozircha qo'llab-quvvatlanmaydi.",
+        "ru": "🔒 Для этого контента требуется авторизованная сессия (login). Пока не поддерживается.",
+        "en": "🔒 This content requires a logged-in session. That isn't supported yet.",
+        "de": "🔒 Für diesen Inhalt ist eine angemeldete Sitzung erforderlich. Das wird noch nicht unterstützt.",
+    },
+    "download_age_restricted": {
+        "uz": "🔒 Bu video yosh cheklovi bilan himoyalangan va faqat tizimga kirgan holatda ko'rish mumkin. Bu hozircha qo'llab-quvvatlanmaydi.",
+        "ru": "🔒 Это видео имеет возрастное ограничение и доступно только авторизованным пользователям. Пока не поддерживается.",
+        "en": "🔒 This video is age-restricted and only viewable when logged in. That isn't supported yet.",
+        "de": "🔒 Dieses Video ist altersbeschränkt und nur für angemeldete Nutzer sichtbar. Das wird noch nicht unterstützt.",
+    },
+    "download_video_unavailable": {
+        "uz": "❌ Bu video mavjud emas yoki o'chirilgan.",
+        "ru": "❌ Это видео недоступно или удалено.",
+        "en": "❌ This video is unavailable or has been removed.",
+        "de": "❌ Dieses Video ist nicht verfügbar oder wurde entfernt.",
+    },
+    "download_not_found": {
+        "uz": "❌ Kontent topilmadi.",
+        "ru": "❌ Контент не найден.",
+        "en": "❌ Content not found.",
+        "de": "❌ Inhalt nicht gefunden.",
+    },
+    "download_geo_restricted": {
+        "uz": "🌍 Bu kontent sizning mintaqangizda mavjud emas.",
+        "ru": "🌍 Этот контент недоступен в вашем регионе.",
+        "en": "🌍 This content isn't available in your region.",
+        "de": "🌍 Dieser Inhalt ist in Ihrer Region nicht verfügbar.",
+    },
+    "download_rate_limited": {
+        "uz": "⏳ Juda ko'p so'rov yuborildi. Birozdan keyin qayta urinib ko'ring.",
+        "ru": "⏳ Слишком много запросов. Попробуйте немного позже.",
+        "en": "⏳ Too many requests right now. Please try again shortly.",
+        "de": "⏳ Zu viele Anfragen. Bitte versuchen Sie es später erneut.",
+    },
+    "download_network_error": {
+        "uz": "🌐 Tarmoq xatoligi yuz berdi. Qayta urinib ko'ring.",
+        "ru": "🌐 Произошла сетевая ошибка. Попробуйте снова.",
+        "en": "🌐 A network error occurred. Please try again.",
+        "de": "🌐 Ein Netzwerkfehler ist aufgetreten. Bitte versuchen Sie es erneut.",
+    },
+    "download_ffmpeg_error": {
+        "uz": "⚠️ Bu videoni tayyorlashda server tomonida texnik muammo yuz berdi. Boshqa havola bilan urinib ko'ring.",
+        "ru": "⚠️ При обработке видео возникла техническая проблема на сервере. Попробуйте другую ссылку.",
+        "en": "⚠️ A server-side technical issue occurred while preparing this video. Please try a different link.",
+        "de": "⚠️ Beim Vorbereiten dieses Videos ist ein serverseitiges technisches Problem aufgetreten. Bitte versuchen Sie einen anderen Link.",
+    },
+    "download_extractor_error": {
+        "uz": "❌ Havolani tahlil qilishda xatolik yuz berdi.",
+        "ru": "❌ Ошибка при анализе ссылки.",
+        "en": "❌ Something went wrong while reading this link.",
+        "de": "❌ Beim Lesen dieses Links ist ein Fehler aufgetreten.",
+    },
 
     # --------------------------------------------------
     # SETTINGS

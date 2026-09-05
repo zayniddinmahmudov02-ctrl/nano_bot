@@ -101,8 +101,11 @@ class DownloadResult:
     extra_files: Optional[List[Tuple[str, str, Optional[str]]]] = None
 
     error_code: Optional[str] = None
-    # error_code: "invalid_url" | "private" | "too_large" |
-    #             "timeout" | "busy" | "failed"
+    # error_code: one of app.services.download_errors' standard
+    # codes (YT_DLP_UNAVAILABLE, INVALID_URL, BUSY, PRIVATE,
+    # LOGIN_REQUIRED, AGE_RESTRICTED, VIDEO_UNAVAILABLE, NOT_FOUND,
+    # GEO_RESTRICTED, RATE_LIMITED, TIMEOUT, NETWORK_ERROR,
+    # FILE_TOO_LARGE, FFMPEG_ERROR, EXTRACTOR_ERROR, UNKNOWN).
 
 
 @contextlib.asynccontextmanager

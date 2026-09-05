@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from app.services.download_errors import BUSY, INVALID_URL
 from app.services.media_downloader_common import (
     DownloadBusyError,
     DownloadResult,
@@ -32,14 +33,14 @@ async def download(url: str) -> DownloadResult:
     """
 
     if not validate_url(url):
-        return DownloadResult(ok=False, error_code="invalid_url")
+        return DownloadResult(ok=False, error_code=INVALID_URL)
 
     try:
         async with download_slot():
             return await run_download(url)
 
     except DownloadBusyError:
-        return DownloadResult(ok=False, error_code="busy")
+        return DownloadResult(ok=False, error_code=BUSY)
 
 
 __all__ = [

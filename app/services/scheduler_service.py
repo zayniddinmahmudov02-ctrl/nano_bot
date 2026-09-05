@@ -127,7 +127,7 @@ async def _job_send_unanswered_reminders() -> None:
     from app.keyboards.nano import nano_unanswered_reminder_keyboard
     from app.services.unanswered_chat_service import (
         get_due_reminders,
-        mark_reminder_sent,
+        try_claim_reminder,
     )
     from app.texts import t
 
@@ -142,6 +142,19 @@ async def _job_send_unanswered_reminders() -> None:
 
     for target in targets:
         try:
+            # MUHIM (race condition — spec 6/8-bo'lim): `targets`
+            # ro'yxati bir necha soniya OLDIN so'ralgan bo'lishi
+            # mumkin — shu oraliqda foydalanuvchi javob yozib,
+            # yozuv ANSWERED bo'lib ulgurgan bo'lishi mumkin.
+            # Xabar yuborishdan DARHOL OLDIN yozuv ATOMIK ravishda
+            # "band" qilinadi (bitta UPDATE ... WHERE); agar bu
+            # False qaytarsa — USER REPLY ustunlik qilgan, reminder
+            # UMUMAN yuborilmaydi.
+            claimed = await try_claim_reminder(target.record_id)
+
+            if not claimed:
+                continue
+
             async with AsyncSessionLocal() as session:
                 lang = await get_user_language(
                     session,
@@ -177,13 +190,14 @@ async def _job_send_unanswered_reminders() -> None:
                 reply_markup=keyboard,
             )
 
-            await mark_reminder_sent(target.record_id)
-
         except Exception:
-            # MUHIM: bitta userga yuborish muvaffaqiyatsiz
-            # bo'lsa ham (masalan bot bloklangan), qolganlar
-            # uchun jarayon davom etadi — reminder_sent shu
-            # holatda belgilanmaydi, keyingi sikl qayta urinadi.
+            # MUHIM: reminder ENDI xabar yuborishdan OLDIN "band"
+            # qilinadi — shu sabab send bosqichida xatolik (masalan
+            # bot bloklangan) bo'lsa ham qayta urinilmaydi (record
+            # allaqachon reminder_sent=True). Bu — race condition'ni
+            # yopish uchun ongli almashinuv: qayta-urinish o'rniga
+            # "javob berilgan chatga ikkinchi marta eslatma
+            # yuborilmasligi" kafolati ustunlik qiladi.
             logger.exception(
                 "Javobsiz chat eslatmasini yuborishda xatolik "
                 "(record_id=%s).",
