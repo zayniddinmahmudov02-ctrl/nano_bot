@@ -680,7 +680,7 @@ async def receive_code(
 
             await state.clear()
 
-            await _post_connect_setup(telegram_id)
+            await _post_connect_setup(telegram_id, message.bot)
 
             await message.answer(
                 "✅ <b>Telegram akkaunt muvaffaqiyatli ulandi!</b>\n\n"
@@ -821,7 +821,7 @@ async def receive_password(
 
             await state.clear()
 
-            await _post_connect_setup(telegram_id)
+            await _post_connect_setup(telegram_id, message.bot)
 
             await message.answer(
                 "✅ <b>Telegram akkaunt muvaffaqiyatli ulandi!</b>\n\n"
@@ -862,6 +862,7 @@ async def receive_password(
 
 async def _post_connect_setup(
     telegram_id: int,
+    bot,
 ) -> None:
     telegram_id = int(telegram_id)
 
@@ -890,6 +891,7 @@ async def _post_connect_setup(
             telegram_id=telegram_id,
             db_user_id=db_user_id,
             telegram_account_id=telegram_account_id,
+            bot=bot,
         )
 
         # MUHIM (tartib qat'iy!): Telethon bir client'ga

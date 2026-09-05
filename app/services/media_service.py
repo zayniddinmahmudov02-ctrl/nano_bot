@@ -10,6 +10,11 @@ from aiogram.types import Message as BotMessage
 from telethon import TelegramClient
 from telethon.tl.types import MessageMediaWebPage, PeerChannel
 
+from app.services.telegram_id_utils import (
+    to_bot_api_chat_id,
+    to_telethon_channel_id,
+)
+
 logger = logging.getLogger(__name__)
 
 SUPPORTED_MESSAGE_TYPES = (
@@ -228,9 +233,16 @@ async def send_post_to_storage(
     # xabar botning javobgarligida, fayl baytlarini bot hech
     # qachon o'zi yuklab olmaydi/qayta yuklamaydi.
     # ------------------------------------------------------
+    # MUHIM (root cause tuzatildi): Bot API `chat_id` Telethon
+    # "bare" channel ID formatidan FARQLI (-100xxxxxxxxxx) — DB'da
+    # eski (bare) formatda saqlangan qator bo'lsa ham, bu yerda
+    # HAR DOIM Bot API ishlaydigan formatga normalizatsiya
+    # qilinadi (aks holda "Bad Request: chat not found" beriladi).
+    bot_api_chat_id = to_bot_api_chat_id(storage_chat_id)
+
     try:
         copied = await bot.copy_message(
-            chat_id=storage_chat_id,
+            chat_id=bot_api_chat_id,
             from_chat_id=source_chat_id,
             message_id=source_message_id,
         )
@@ -279,7 +291,7 @@ async def send_post_to_storage(
     # ------------------------------------------------------
     try:
         storage_entity = await telethon_client.get_entity(
-            PeerChannel(storage_chat_id)
+            PeerChannel(to_telethon_channel_id(storage_chat_id))
         )
     except Exception as exc:
         logger.error(
@@ -372,7 +384,7 @@ async def send_stored_post(
 
     try:
         storage_entity = await telethon_client.get_entity(
-            PeerChannel(storage_chat_id)
+            PeerChannel(to_telethon_channel_id(storage_chat_id))
         )
     except Exception:
         # MUHIM: aynan shu bosqichda (entity/kanalning o'zini

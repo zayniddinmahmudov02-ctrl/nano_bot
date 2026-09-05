@@ -91,6 +91,7 @@ async def storage_recreate_confirm(
         telegram_id=telegram_id,
         db_user_id=db_user_id,
         telegram_account_id=telegram_account_id,
+        bot=callback.bot,
     )
 
     if channel is None:

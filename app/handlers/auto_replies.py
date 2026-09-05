@@ -315,6 +315,7 @@ async def resolve_storage_channel_or_prompt(
         telegram_id=telegram_id,
         db_user_id=db_user_id,
         telegram_account_id=telegram_account_id,
+        bot=message.bot,
     )
 
     if result.status == NEEDS_CONFIRMATION:

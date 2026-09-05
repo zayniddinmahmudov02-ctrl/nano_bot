@@ -519,6 +519,7 @@ async def recreate_user_storage_channel(
     telegram_id: int,
     db_user_id: int,
     telegram_account_id: int,
+    bot: Bot,
 ) -> Optional[TelegramStorageChannel]:
     """
     Foydalanuvchi eski kanal o'chirilgani haqidagi tasdiqlash
@@ -531,6 +532,11 @@ async def recreate_user_storage_channel(
     `storage_chat_id` referenslari (agar ular hali eski qiymatni
     saqlab tursa ham) tarixiy iz sifatida qoladi, lekin YANGI
     postlar endi albatta yangi (ishlaydigan) kanalga tushadi.
+
+    MUHIM (spec 14-bo'lim): "Ha" bosilganda yangi kanal ham
+    yuqoridagi bilan bir xil — bot admin qilinadi VA Bot API
+    orqali mustaqil tasdiqlanadi (`_ensure_and_verify_bot_admin`)
+    — faqat shundan keyin qator DB'da qoladi/`active` hisoblanadi.
     """
 
     client = await _get_ready_client(telegram_id)
@@ -538,21 +544,34 @@ async def recreate_user_storage_channel(
     if client is None:
         return None
 
-    chat_id = await _create_channel_via_telethon(client)
+    telethon_channel_id = await _create_channel_via_telethon(client)
 
-    if chat_id is None:
+    if telethon_channel_id is None:
         return None
+
+    bot_api_chat_id = to_bot_api_chat_id(telethon_channel_id)
+
+    logger.info(
+        "Storage channel CREATE (recreate): user_id=%s, "
+        "account_id=%s, telethon_channel_id=%s, bot_api_chat_id=%s",
+        db_user_id,
+        telegram_account_id,
+        telethon_channel_id,
+        bot_api_chat_id,
+    )
 
     channel = await _save_channel(
         db_user_id=db_user_id,
         telegram_account_id=telegram_account_id,
-        chat_id=chat_id,
+        chat_id=bot_api_chat_id,
     )
 
     if channel is None:
         return None
 
-    if not await _ensure_bot_is_storage_admin(client, chat_id):
+    if not await _ensure_and_verify_bot_admin(
+        client, bot, bot_api_chat_id
+    ):
         return None
 
     logger.info(
@@ -573,6 +592,7 @@ async def ensure_storage_channel(
     telegram_id: int,
     db_user_id: int,
     telegram_account_id: int,
+    bot: Bot,
 ) -> Optional[TelegramStorageChannel]:
     """
     MUHIM: bu funksiya endi faqat orqaga moslik uchun saqlanadi.
@@ -588,6 +608,7 @@ async def ensure_storage_channel(
         telegram_id=telegram_id,
         db_user_id=db_user_id,
         telegram_account_id=telegram_account_id,
+        bot=bot,
     )
 
     if result.status in (READY, CREATED):
