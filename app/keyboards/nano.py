@@ -526,6 +526,31 @@ def _unanswered_chat_button(
     )
 
 
+# MUHIM (spec 6-bo'lim): callback_data qisqa va xavfsiz —
+# `unanswered:answered:<record_id>` oilasidan. Ro'yxat ichidagi
+# tugma qaysi SAHIFAdan bosilganini ham olib yuradi (`list`
+# konteksti) — shu orqali [✅ Javob berdim] bosilgach xuddi
+# o'sha sahifa, item olib tashlangan holda, to'g'ri qayta
+# hisoblangan pagination bilan qayta chizilishi mumkin (spec
+# 7-bo'lim). Reminder xabari alohida, sahifasiz kontekst
+# (`reminder`) ishlatadi.
+def _unanswered_answered_button(
+    *,
+    record_id: int,
+    lang: str,
+    page: Optional[int] = None,
+) -> InlineKeyboardButton:
+    if page is not None:
+        callback_data = f"unanswered:answered:list:{page}:{record_id}"
+    else:
+        callback_data = f"unanswered:answered:reminder:{record_id}"
+
+    return InlineKeyboardButton(
+        text=t("btn_unanswered_answered", lang),
+        callback_data=callback_data,
+    )
+
+
 def nano_unanswered_list_keyboard(
     items: list,
     page: int,
@@ -540,7 +565,12 @@ def nano_unanswered_list_keyboard(
                 peer_username=item.peer_username,
                 peer_id=item.peer_id,
                 lang=lang,
-            )
+            ),
+            _unanswered_answered_button(
+                record_id=item.id,
+                lang=lang,
+                page=page,
+            ),
         ]
         for item in items
     ]
@@ -599,7 +629,12 @@ def nano_unanswered_reminder_keyboard(
                     peer_username=peer_username,
                     peer_id=peer_id,
                     lang=lang,
-                )
+                ),
+                _unanswered_answered_button(
+                    record_id=record_id,
+                    lang=lang,
+                    page=None,
+                ),
             ]
         ]
     )

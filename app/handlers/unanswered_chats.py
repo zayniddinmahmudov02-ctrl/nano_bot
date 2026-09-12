@@ -13,7 +13,12 @@ from app.keyboards.nano import (
     nano_unanswered_list_keyboard,
 )
 from app.services.access_guard import guard_callback_access
-from app.services.unanswered_chat_service import get_unanswered_page
+from app.services.unanswered_chat_service import (
+    MANUAL_ANSWERED_ALREADY,
+    MANUAL_ANSWERED_NOT_FOUND,
+    get_unanswered_page,
+    mark_answered_manually,
+)
 from app.services.user_service import (
     get_connected_telegram_account,
     get_user_by_telegram_id,
@@ -287,6 +292,111 @@ async def nano_unanswered_nolink(
     await callback.answer(
         t("unanswered_nolink_alert", lang),
         show_alert=True,
+    )
+
+
+@router.callback_query(F.data.startswith("unanswered:answered:"))
+async def unanswered_mark_answered(
+    callback: CallbackQuery,
+) -> None:
+    """
+    [✅ Javob berdim] — qo'lda tasdiqlash orqali ANSWERED qilish
+    (spec 1/6-bo'lim).
+
+    Callback data ikki shaklda keladi:
+    - "unanswered:answered:list:<page>:<record_id>" — ro'yxat
+      ichidagi tugma (bosilgach xuddi SHU sahifa, item olib
+      tashlangan holda qayta chiziladi);
+    - "unanswered:answered:reminder:<record_id>" — reminder
+      xabaridagi tugma (bosilgach shu xabar qisqa tasdiqqa
+      almashtiriladi).
+
+    MUHIM: haqiqiy egalik/state tekshiruvi butunlay
+    `mark_answered_manually()` ichida, BITTA atomik UPDATE orqali
+    bajariladi — bu yerda faqat foydalanuvchiga qanday javob
+    ko'rsatish kerakligi hal qilinadi.
+    """
+
+    if callback.from_user is None:
+        await callback.answer()
+        return
+
+    parts = (callback.data or "").split(":")
+
+    try:
+        record_id = int(parts[-1])
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+
+    is_list_context = len(parts) >= 5 and parts[2] == "list"
+
+    page = 1
+
+    if is_list_context:
+        try:
+            page = int(parts[3])
+        except ValueError:
+            page = 1
+
+    telegram_id = int(callback.from_user.id)
+
+    _user, account, lang = await _resolve_account(telegram_id)
+
+    if not await guard_callback_access(callback, lang):
+        return
+
+    if account is None:
+        await callback.answer()
+        return
+
+    result = await mark_answered_manually(
+        record_id=record_id,
+        telegram_account_id=account.id,
+    )
+
+    if result == MANUAL_ANSWERED_NOT_FOUND:
+        await callback.answer(
+            t("unanswered_answered_forbidden_alert", lang),
+            show_alert=True,
+        )
+        return
+
+    if result == MANUAL_ANSWERED_ALREADY:
+        await callback.answer(
+            t("unanswered_already_answered_alert", lang)
+        )
+    else:
+        await callback.answer(
+            t("unanswered_answered_confirm_alert", lang)
+        )
+
+    if is_list_context:
+        text, items, page, total_pages = await _render_list_text(
+            account.id,
+            page,
+            lang,
+        )
+
+        await _safe_edit(
+            callback,
+            text,
+            nano_unanswered_list_keyboard(
+                items,
+                page,
+                total_pages,
+                lang,
+            ),
+        )
+        return
+
+    # Reminder xabari — alohida, sahifasiz kontekst: xabarni
+    # qisqa tasdiqqa almashtiramiz, tugmalar olib tashlanadi
+    # (qayta bosishning hojati yo'q).
+    await _safe_edit(
+        callback,
+        t("unanswered_answered_confirm_alert", lang),
+        None,
     )
 
 

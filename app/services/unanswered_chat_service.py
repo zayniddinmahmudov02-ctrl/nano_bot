@@ -18,6 +18,12 @@ STATUS_ANSWERED = "ANSWERED"
 
 REMINDER_THRESHOLD = timedelta(hours=24)
 
+# `mark_answered_manually()` natija kodlari — [✅ Javob berdim]
+# tugmasi uchun.
+MANUAL_ANSWERED_OK = "OK"
+MANUAL_ANSWERED_ALREADY = "ALREADY"
+MANUAL_ANSWERED_NOT_FOUND = "NOT_FOUND"
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -164,6 +170,86 @@ async def mark_answered(
             "Unanswered chat'ni ANSWERED qilishda xatolik."
         )
         return False
+
+
+# ============================================================
+# MANUAL [✅ Javob berdim] TUGMASI
+# ============================================================
+
+async def mark_answered_manually(
+    *,
+    record_id: int,
+    telegram_account_id: int,
+    replied_at: Optional[datetime] = None,
+) -> str:
+    """
+    "💬 Javob berilmagan chatlar" ro'yxatidagi (yoki reminder
+    xabaridagi) [✅ Javob berdim] tugmasi bosilganda chaqiriladi.
+
+    MUHIM (egalik tekshiruvi — spec 5/6-bo'lim): yagona
+    state-o'zgartiruvchi amal — bitta ATOMIK
+    `UPDATE ... WHERE id=... AND telegram_account_id=... AND
+    status='UNANSWERED'` — HAM record_id, HAM
+    telegram_account_id (qo'ng'iroq qilayotgan foydalanuvchining
+    O'Z akkaunti) mos kelishini talab qiladi. Boshqa akkauntga
+    tegishli (yoki soxta/eskirgan) record_id uchun bu UPDATE hech
+    narsani o'zgartirmaydi — xato yoki side-effect YO'Q.
+
+    Qaytaradi:
+    - MANUAL_ANSWERED_OK — hozir ANSWERED qilindi;
+    - MANUAL_ANSWERED_ALREADY — allaqachon ANSWERED edi (real user
+      javobi orqali YOKI oldin shu tugma bosilgani sababli) —
+      IDEMPOTENT, xatolik EMAS (spec 1.8/7-bo'lim: "duplicate
+      action bo'lmasin va xatolik bermasin");
+    - MANUAL_ANSWERED_NOT_FOUND — record umuman yo'q YOKI boshqa
+      akkauntga tegishli — action RAD ETILADI.
+    """
+
+    replied_at = replied_at or _now()
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                update(UnansweredChat)
+                .where(
+                    UnansweredChat.id == record_id,
+                    UnansweredChat.telegram_account_id
+                    == telegram_account_id,
+                    UnansweredChat.status == STATUS_UNANSWERED,
+                )
+                .values(
+                    status=STATUS_ANSWERED,
+                    user_replied_at=replied_at,
+                )
+            )
+
+            await session.commit()
+
+            if result.rowcount > 0:
+                return MANUAL_ANSWERED_OK
+
+            # Hech narsa o'zgarmadi — SABABINI aniqlash uchun
+            # (faqat to'g'ri xabar ko'rsatish maqsadida, o'zi
+            # holicha state-o'zgartiruvchi EMAS) qayta o'qiladi.
+            existing = await session.get(
+                UnansweredChat, record_id
+            )
+
+            if (
+                existing is None
+                or existing.telegram_account_id
+                != telegram_account_id
+            ):
+                return MANUAL_ANSWERED_NOT_FOUND
+
+            return MANUAL_ANSWERED_ALREADY
+
+    except Exception:
+        logger.exception(
+            "[Javob berdim] tugmasida xatolik (record_id=%s).",
+            record_id,
+        )
+        return MANUAL_ANSWERED_NOT_FOUND
 
 
 # ============================================================
@@ -420,8 +506,12 @@ __all__ = [
     "STATUS_UNANSWERED",
     "STATUS_ANSWERED",
     "REMINDER_THRESHOLD",
+    "MANUAL_ANSWERED_OK",
+    "MANUAL_ANSWERED_ALREADY",
+    "MANUAL_ANSWERED_NOT_FOUND",
     "record_outgoing_message",
     "mark_answered",
+    "mark_answered_manually",
     "UnansweredChatItem",
     "get_unanswered_page",
     "get_unanswered_chat_by_id",

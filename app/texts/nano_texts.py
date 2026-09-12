@@ -879,6 +879,30 @@ _TEXTS: Dict[str, Dict[str, str]] = {
         "en": "👤 {name}",
         "de": "👤 {name}",
     },
+    "btn_unanswered_answered": {
+        "uz": "✅ Javob berdim",
+        "ru": "✅ Я ответил(а)",
+        "en": "✅ I replied",
+        "de": "✅ Ich habe geantwortet",
+    },
+    "unanswered_answered_confirm_alert": {
+        "uz": "✅ Chat javob berilgan deb belgilandi.",
+        "ru": "✅ Чат отмечен как отвеченный.",
+        "en": "✅ Chat marked as answered.",
+        "de": "✅ Chat als beantwortet markiert.",
+    },
+    "unanswered_already_answered_alert": {
+        "uz": "ℹ️ Bu chat allaqachon javob berilgan deb belgilangan.",
+        "ru": "ℹ️ Этот чат уже отмечен как отвеченный.",
+        "en": "ℹ️ This chat is already marked as answered.",
+        "de": "ℹ️ Dieser Chat ist bereits als beantwortet markiert.",
+    },
+    "unanswered_answered_forbidden_alert": {
+        "uz": "❌ Bu amalni bajarib bo'lmadi.",
+        "ru": "❌ Не удалось выполнить это действие.",
+        "en": "❌ This action couldn't be completed.",
+        "de": "❌ Diese Aktion konnte nicht ausgeführt werden.",
+    },
     "duration_days_hours": {
         "uz": "{days} kun {hours} soat",
         "ru": "{days} дн {hours} ч",
